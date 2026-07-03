@@ -1,0 +1,11 @@
+# Hazard zones. Managed with /lab zone add|remove|list - you can also edit by hand
+# (then /lab reload).
+#
+# Zone types:
+#   radiation - wither effect inside; the geiger counter reacts to these zones
+#   toxic     - poison effect inside
+#   cryo      - freezing (powder snow effect) + slowness inside
+#
+# A full hazmat suit (all 4 pieces, /lab give hazmat) protects from all zone types.
+
+zones: {}

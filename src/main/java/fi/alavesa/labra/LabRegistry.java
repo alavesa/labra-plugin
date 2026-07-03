@@ -1,0 +1,143 @@
+package fi.alavesa.labra;
+
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextDecoration;
+import org.bukkit.Color;
+import org.bukkit.Location;
+import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
+import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemFlag;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.inventory.meta.LeatherArmorMeta;
+import org.bukkit.inventory.meta.components.CustomModelDataComponent;
+import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.plugin.Plugin;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/** Loads/saves lab.yml zones and builds the lab items (hazmat pieces, geiger counter). */
+public final class LabRegistry {
+
+    public static final List<String> ZONE_TYPES = List.of("radiation", "toxic", "cryo");
+
+    private final Plugin plugin;
+    private final NamespacedKey hazmatKey;
+    private final NamespacedKey geigerKey;
+    private final Map<String, Zone> zones = new LinkedHashMap<>();
+    private File file;
+    private YamlConfiguration yaml;
+
+    public LabRegistry(Plugin plugin) {
+        this.plugin = plugin;
+        this.hazmatKey = new NamespacedKey(plugin, "hazmat");
+        this.geigerKey = new NamespacedKey(plugin, "geiger");
+    }
+
+    public void load() {
+        file = new File(plugin.getDataFolder(), "lab.yml");
+        if (!file.exists()) plugin.saveResource("lab.yml", false);
+        yaml = YamlConfiguration.loadConfiguration(file);
+        zones.clear();
+        ConfigurationSection root = yaml.getConfigurationSection("zones");
+        if (root == null) return;
+        for (String name : root.getKeys(false)) {
+            ConfigurationSection s = root.getConfigurationSection(name);
+            if (s == null) continue;
+            zones.put(name.toLowerCase(), new Zone(
+                name.toLowerCase(),
+                s.getString("world", "world"),
+                s.getDouble("x"), s.getDouble("y"), s.getDouble("z"),
+                Math.max(1, Math.min(64, s.getDouble("radius", 8))),
+                s.getString("type", "radiation").toLowerCase()
+            ));
+        }
+    }
+
+    public Map<String, Zone> zones() { return zones; }
+
+    public boolean addZone(String name, String type, double radius, Location at) throws IOException {
+        String key = name.toLowerCase();
+        if (zones.containsKey(key)) return false;
+        String path = "zones." + key + ".";
+        yaml.set(path + "world", at.getWorld().getName());
+        yaml.set(path + "x", at.getX());
+        yaml.set(path + "y", at.getY());
+        yaml.set(path + "z", at.getZ());
+        yaml.set(path + "radius", Math.max(1, Math.min(64, radius)));
+        yaml.set(path + "type", type.toLowerCase());
+        yaml.save(file);
+        load();
+        return true;
+    }
+
+    public boolean removeZone(String name) throws IOException {
+        String key = name.toLowerCase();
+        if (!zones.containsKey(key)) return false;
+        yaml.set("zones." + key, null);
+        yaml.save(file);
+        load();
+        return true;
+    }
+
+    /** The four hazmat pieces: yellow leather armor, custom model ids hazmat_helmet etc. */
+    public List<ItemStack> buildHazmatSuit() {
+        return List.of(
+            hazmatPiece(Material.LEATHER_HELMET, "hazmat_helmet", "Hazmat Hood"),
+            hazmatPiece(Material.LEATHER_CHESTPLATE, "hazmat_chestplate", "Hazmat Suit"),
+            hazmatPiece(Material.LEATHER_LEGGINGS, "hazmat_leggings", "Hazmat Pants"),
+            hazmatPiece(Material.LEATHER_BOOTS, "hazmat_boots", "Hazmat Boots")
+        );
+    }
+
+    private ItemStack hazmatPiece(Material material, String model, String name) {
+        ItemStack item = new ItemStack(material);
+        LeatherArmorMeta meta = (LeatherArmorMeta) item.getItemMeta();
+        meta.setColor(Color.fromRGB(230, 200, 40));
+        meta.itemName(Component.text(name, NamedTextColor.YELLOW).decoration(TextDecoration.ITALIC, false));
+        CustomModelDataComponent cmd = meta.getCustomModelDataComponent();
+        cmd.setStrings(List.of(model));
+        meta.setCustomModelDataComponent(cmd);
+        meta.setUnbreakable(true);
+        meta.addItemFlags(ItemFlag.HIDE_UNBREAKABLE, ItemFlag.HIDE_DYE);
+        meta.getPersistentDataContainer().set(hazmatKey, PersistentDataType.BYTE, (byte) 1);
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    public ItemStack buildGeiger() {
+        ItemStack item = new ItemStack(Material.CLOCK);
+        ItemMeta meta = item.getItemMeta();
+        meta.itemName(Component.text("Geiger Counter", NamedTextColor.GREEN).decoration(TextDecoration.ITALIC, false));
+        CustomModelDataComponent cmd = meta.getCustomModelDataComponent();
+        cmd.setStrings(List.of("lab_geiger"));
+        meta.setCustomModelDataComponent(cmd);
+        meta.getPersistentDataContainer().set(geigerKey, PersistentDataType.BYTE, (byte) 1);
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    /** Full protection = all four armor slots are hazmat pieces. */
+    public boolean hasFullHazmat(Player player) {
+        for (ItemStack piece : player.getInventory().getArmorContents()) {
+            if (piece == null || !piece.hasItemMeta()) return false;
+            if (!piece.getItemMeta().getPersistentDataContainer().has(hazmatKey, PersistentDataType.BYTE)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public boolean isGeiger(ItemStack item) {
+        return item != null && item.hasItemMeta()
+            && item.getItemMeta().getPersistentDataContainer().has(geigerKey, PersistentDataType.BYTE);
+    }
+}

@@ -1,0 +1,23 @@
+name: Labra
+version: '0.1.0'
+main: fi.alavesa.labra.LabraPlugin
+api-version: '1.21'
+author: Piia Alavesa
+description: Lab equipment - hazard zones, hazmat suits, geiger counter.
+commands:
+  lab:
+    description: Lab commands - give, zone, reload
+    usage: |
+      /lab give hazmat|geiger [player]
+      /lab zone add <name> <radiation|toxic|cryo> <radius>
+      /lab zone remove <name>
+      /lab zone list
+      /lab reload
+    aliases: [labra]
+permissions:
+  lab.give:
+    description: Get lab items
+    default: true
+  lab.admin:
+    description: Manage hazard zones
+    default: op
