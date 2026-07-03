@@ -4,6 +4,9 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.entity.Player;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * Runs every 5 ticks: players holding a geiger counter hear it click faster the closer
  * they are to a radiation zone, with a reading in the actionbar. The counter senses
@@ -23,6 +26,13 @@ public final class GeigerTask implements Runnable {
     @Override
     public void run() {
         tick++;
+
+        // Radioactive samples are portable sources: anyone carrying one radiates (reach 12)
+        List<Player> carriers = new ArrayList<>();
+        for (Player p : plugin.getServer().getOnlinePlayers()) {
+            if (registry.hasSample(p)) carriers.add(p);
+        }
+
         for (Player player : plugin.getServer().getOnlinePlayers()) {
             if (!registry.isGeiger(player.getInventory().getItemInMainHand())
                 && !registry.isGeiger(player.getInventory().getItemInOffHand())) continue;
@@ -34,6 +44,11 @@ public final class GeigerTask implements Runnable {
                 double reach = zone.radius() * 2;
                 double dist = zone.distance(player.getLocation());
                 if (dist < reach) intensity = Math.max(intensity, 1.0 - dist / reach);
+            }
+            for (Player carrier : carriers) {
+                if (carrier.getWorld() != player.getWorld()) continue;
+                double dist = carrier.getLocation().distance(player.getLocation());
+                if (dist < 12) intensity = Math.max(intensity, 1.0 - dist / 12.0);
             }
 
             if (intensity <= 0) {

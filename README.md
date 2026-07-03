@@ -26,18 +26,27 @@ Spigot) 1.21.4+ and Java 21. No datapack needed.
   - `radiation`: wither + ☢ warning (and geiger counters react)
   - `toxic`: poison + ☠ warning
   - `cryo`: freezing (powder-snow effect) + slowness + ❄ warning
+  - `decon`: a **decontamination shower** — washes off poison, wither, slowness, glowing,
+    fire and freezing with water spray (build it as an airlock room between lab sections)
+- **Zone sirens** (`/lab zone alarm <name> on`) — while an unprotected player is inside an
+  alarmed zone, a loud horn blares to everyone within 48 blocks. Containment breach!
 - **Hazmat suit** (`/lab give hazmat`) — 4-piece yellow suit; wearing ALL FOUR pieces makes
   every zone type harmless (calm green "protected" message instead).
 - **Geiger counter** (`/lab give geiger`) — hold it in either hand: it ticks calmly when
   clear, clicks faster and faster as you approach a radiation zone (senses out to 2× the
   zone radius), and shows a µSv/h reading that goes green → yellow → red.
+- **Radioactive sample** (`/lab give sample`) — a portable radiation source: every geiger
+  counter within 12 blocks reacts to whoever carries it, and carrying it without a full
+  hazmat suit slowly withers you. Great for fetch-quest missions ("retrieve the sample from
+  the reactor room").
 
 ## Commands (`/lab`, alias `/labra`)
 
 | Command | What it does | Permission |
 |---|---|---|
-| `/lab give hazmat\|geiger [player]` | get lab items | lab.give |
+| `/lab give hazmat\|geiger\|sample [player]` | get lab items | lab.give |
 | `/lab zone add <name> <type> <radius>` | create a zone where you stand | lab.admin (op) |
+| `/lab zone alarm <name> on\|off` | toggle a zone's siren | lab.admin (op) |
 | `/lab zone remove <name>` | delete a zone | lab.admin (op) |
 | `/lab zone list` | list zones with locations | lab.admin (op) |
 | `/lab reload` | reload lab.yml | lab.admin (op) |
@@ -56,6 +65,7 @@ items carry `custom_model_data` string ids, same system as the Guns pack:
 | Hazmat pants | `leather_leggings` | `hazmat_leggings` |
 | Hazmat boots | `leather_boots` | `hazmat_boots` |
 | Geiger counter | `clock` | `lab_geiger` |
+| Radioactive sample | `glowstone_dust` | `lab_sample` |
 
 See the [Guns resource pack guide](https://github.com/alavesa/guns-plugin/blob/main/resource-pack/OHJEET.md)
 (in Finnish) — the exact same steps apply, just with these ids.
@@ -68,5 +78,5 @@ mvn package    # requires JDK 21; jar lands in target/
 
 ## Ideas for later
 
-Airlock/decontamination showers, radioactive item samples, lab terminals with research
-notes, alarm sirens tied to zones. Open an issue or just ask.
+Lab terminals with research notes, box-shaped zones, contamination that spreads between
+players, sample containment cases (carry safely without a suit). Open an issue or just ask.

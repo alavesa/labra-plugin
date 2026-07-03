@@ -50,7 +50,12 @@ public final class LabraPlugin extends JavaPlugin {
                             sender.sendMessage(Component.text("Gave a geiger counter to "
                                 + target.getName(), NamedTextColor.GREEN));
                         }
-                        default -> { return error(sender, "Unknown item. Items: hazmat, geiger"); }
+                        case "sample" -> {
+                            target.getInventory().addItem(registry.buildSample());
+                            sender.sendMessage(Component.text("Gave a radioactive sample to "
+                                + target.getName() + " - careful with it!", NamedTextColor.GREEN));
+                        }
+                        default -> { return error(sender, "Unknown item. Items: hazmat, geiger, sample"); }
                     }
                     return true;
                 }
@@ -96,6 +101,16 @@ public final class LabraPlugin extends JavaPlugin {
                                 NamedTextColor.AQUA));
                             return true;
                         }
+                        case "alarm" -> {
+                            if (args.length < 4) return usage(sender);
+                            boolean on = args[3].equalsIgnoreCase("on");
+                            if (!on && !args[3].equalsIgnoreCase("off")) return error(sender, "Use on or off.");
+                            if (!registry.setAlarm(args[2], on)) return error(sender, "No zone named '" + args[2] + "'.");
+                            sender.sendMessage(Component.text("Zone '" + args[2].toLowerCase() + "' siren "
+                                + (on ? "ON - it blares while an unprotected player is inside." : "off."),
+                                NamedTextColor.AQUA));
+                            return true;
+                        }
                         default -> { return usage(sender); }
                     }
                 }
@@ -119,14 +134,18 @@ public final class LabraPlugin extends JavaPlugin {
         return switch (args.length) {
             case 1 -> filter(Stream.of("give", "zone", "reload"), args[0]);
             case 2 -> switch (args[0].toLowerCase()) {
-                case "give" -> filter(Stream.of("hazmat", "geiger"), args[1]);
-                case "zone" -> filter(Stream.of("add", "remove", "list"), args[1]);
+                case "give" -> filter(Stream.of("hazmat", "geiger", "sample"), args[1]);
+                case "zone" -> filter(Stream.of("add", "remove", "list", "alarm"), args[1]);
                 default -> List.of();
             };
-            case 3 -> args[0].equalsIgnoreCase("zone") && args[1].equalsIgnoreCase("remove")
+            case 3 -> args[0].equalsIgnoreCase("zone")
+                && (args[1].equalsIgnoreCase("remove") || args[1].equalsIgnoreCase("alarm"))
                 ? filter(registry.zones().keySet().stream(), args[2]) : List.of();
-            case 4 -> args[0].equalsIgnoreCase("zone") && args[1].equalsIgnoreCase("add")
-                ? filter(LabRegistry.ZONE_TYPES.stream(), args[3]) : List.of();
+            case 4 -> switch (args[0].equalsIgnoreCase("zone") ? args[1].toLowerCase() : "") {
+                case "add" -> filter(LabRegistry.ZONE_TYPES.stream(), args[3]);
+                case "alarm" -> filter(Stream.of("on", "off"), args[3]);
+                default -> List.of();
+            };
             default -> List.of();
         };
     }
@@ -137,7 +156,7 @@ public final class LabraPlugin extends JavaPlugin {
 
     private boolean usage(CommandSender sender) {
         sender.sendMessage(Component.text(
-            "/lab give hazmat|geiger [player] | zone add <name> <radiation|toxic|cryo> <radius> | zone remove <name> | zone list | reload",
+            "/lab give hazmat|geiger|sample [player] | zone add <name> <radiation|toxic|cryo|decon> <radius> | zone alarm <name> on|off | zone remove <name> | zone list | reload",
             NamedTextColor.AQUA));
         return true;
     }

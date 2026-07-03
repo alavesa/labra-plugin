@@ -27,11 +27,12 @@ import java.util.Map;
 /** Loads/saves lab.yml zones and builds the lab items (hazmat pieces, geiger counter). */
 public final class LabRegistry {
 
-    public static final List<String> ZONE_TYPES = List.of("radiation", "toxic", "cryo");
+    public static final List<String> ZONE_TYPES = List.of("radiation", "toxic", "cryo", "decon");
 
     private final Plugin plugin;
     private final NamespacedKey hazmatKey;
     private final NamespacedKey geigerKey;
+    private final NamespacedKey sampleKey;
     private final Map<String, Zone> zones = new LinkedHashMap<>();
     private File file;
     private YamlConfiguration yaml;
@@ -40,6 +41,7 @@ public final class LabRegistry {
         this.plugin = plugin;
         this.hazmatKey = new NamespacedKey(plugin, "hazmat");
         this.geigerKey = new NamespacedKey(plugin, "geiger");
+        this.sampleKey = new NamespacedKey(plugin, "sample");
     }
 
     public void load() {
@@ -57,7 +59,8 @@ public final class LabRegistry {
                 s.getString("world", "world"),
                 s.getDouble("x"), s.getDouble("y"), s.getDouble("z"),
                 Math.max(1, Math.min(64, s.getDouble("radius", 8))),
-                s.getString("type", "radiation").toLowerCase()
+                s.getString("type", "radiation").toLowerCase(),
+                s.getBoolean("alarm", false)
             ));
         }
     }
@@ -74,6 +77,16 @@ public final class LabRegistry {
         yaml.set(path + "z", at.getZ());
         yaml.set(path + "radius", Math.max(1, Math.min(64, radius)));
         yaml.set(path + "type", type.toLowerCase());
+        yaml.save(file);
+        load();
+        return true;
+    }
+
+    /** Turn a zone's siren on/off. Returns false if the zone doesn't exist. */
+    public boolean setAlarm(String name, boolean on) throws IOException {
+        String key = name.toLowerCase();
+        if (!zones.containsKey(key)) return false;
+        yaml.set("zones." + key + ".alarm", on);
         yaml.save(file);
         load();
         return true;
@@ -123,6 +136,34 @@ public final class LabRegistry {
         meta.getPersistentDataContainer().set(geigerKey, PersistentDataType.BYTE, (byte) 1);
         item.setItemMeta(meta);
         return item;
+    }
+
+    /** A radioactive sample: a portable radiation source. Geiger counters react to whoever
+     *  carries it, and carrying it without a full hazmat suit slowly hurts. */
+    public ItemStack buildSample() {
+        ItemStack item = new ItemStack(Material.GLOWSTONE_DUST);
+        ItemMeta meta = item.getItemMeta();
+        meta.itemName(Component.text("Radioactive Sample ☢", NamedTextColor.GREEN)
+            .decoration(TextDecoration.ITALIC, false));
+        CustomModelDataComponent cmd = meta.getCustomModelDataComponent();
+        cmd.setStrings(List.of("lab_sample"));
+        meta.setCustomModelDataComponent(cmd);
+        meta.getPersistentDataContainer().set(sampleKey, PersistentDataType.BYTE, (byte) 1);
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    public boolean isSample(ItemStack item) {
+        return item != null && item.hasItemMeta()
+            && item.getItemMeta().getPersistentDataContainer().has(sampleKey, PersistentDataType.BYTE);
+    }
+
+    /** Is a radioactive sample anywhere in this player's inventory? */
+    public boolean hasSample(Player player) {
+        for (ItemStack item : player.getInventory().getContents()) {
+            if (isSample(item)) return true;
+        }
+        return false;
     }
 
     /** Full protection = all four armor slots are hazmat pieces. */

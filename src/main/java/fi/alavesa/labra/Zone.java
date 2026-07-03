@@ -2,8 +2,10 @@ package fi.alavesa.labra;
 
 import org.bukkit.Location;
 
-/** A spherical hazard zone. type: radiation | toxic | cryo. */
-public record Zone(String name, String world, double x, double y, double z, double radius, String type) {
+/** A spherical hazard zone. type: radiation | toxic | cryo | decon.
+ *  alarm: when true, a siren sounds while an unprotected player is inside. */
+public record Zone(String name, String world, double x, double y, double z, double radius,
+                   String type, boolean alarm) {
 
     public boolean contains(Location loc) {
         return loc.getWorld().getName().equals(world) && distance(loc) <= radius;
