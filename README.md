@@ -1,5 +1,7 @@
 # Labra — lab equipment for Paper servers
 
+[![Reviewed by PatchPilots](https://img.shields.io/badge/Reviewed%20by-PatchPilots-8A2BE2)](https://github.com/alavesa/patchpilots)
+
 Lab gear for facility/SCP-style servers: **hazard zones** (radiation ☢ / toxic ☠ / cryo ❄),
 a **hazmat suit** that protects inside them, and a **geiger counter** that clicks faster the
 closer you get to radiation. Companion to

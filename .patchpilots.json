@@ -1,0 +1,4 @@
+{
+  "include": ["**/*.java", "**/*.mcfunction", "**/*.json", "**/*.yml"],
+  "exclude": ["node_modules/**", "dist/**", ".git/**", "target/**", "build/**", ".patchpilots.json", "package-lock.json"]
+}
