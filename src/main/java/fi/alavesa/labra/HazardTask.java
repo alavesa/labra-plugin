@@ -2,6 +2,7 @@ package fi.alavesa.labra;
 
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Location;
 import org.bukkit.Particle;
 import org.bukkit.World;
@@ -12,8 +13,17 @@ import org.bukkit.potion.PotionEffectType;
 /**
  * Runs once a second: zone effects, decontamination, zone sirens and the radioactive
  * sample's exposure. A full hazmat suit protects from everything except the siren noise.
+ *
+ * Containment (v0.3): hazard reaches a player only with a clear line from the zone source -
+ * walls and closed doors seal it in; open doors and gaps leak. Radiation is deliberately
+ * INVISIBLE: no warning text, no protected-message - only the geiger counter, the metallic
+ * taste when dangerously close, and the damage itself reveal it.
  */
 public final class HazardTask implements Runnable {
+
+    private static final Component METAL_TASTE = Component
+        .text("I taste metal in my mouth...", NamedTextColor.GRAY)
+        .decoration(TextDecoration.ITALIC, true);
 
     private final LabraPlugin plugin;
     private final LabRegistry registry;
@@ -29,31 +39,52 @@ public final class HazardTask implements Runnable {
         tick++;
 
         for (Player player : plugin.getServer().getOnlinePlayers()) {
-            // Carrying a radioactive sample without a full suit hurts, wherever you are
             boolean suited = registry.hasFullHazmat(player);
+
+            // Carrying a radioactive sample without a suit hurts - no ☢ text, just the taste
             if (!suited && registry.hasSample(player)) {
                 player.addPotionEffect(new PotionEffect(PotionEffectType.WITHER, 45, 0));
-                player.sendActionBar(Component.text("☢ Radioactive sample in your inventory!",
-                    NamedTextColor.RED));
+                player.sendActionBar(METAL_TASTE);
             }
 
-            Zone zone = registry.zones().values().stream()
-                .filter(z -> z.contains(player.getLocation()))
-                .findFirst().orElse(null);
-            if (zone == null) continue;
+            Zone inside = null;
+            boolean metalTaste = false;
+            for (Zone zone : registry.zones().values()) {
+                if (!zone.world().equals(player.getWorld().getName())) continue;
+                if (zone.type().equals("decon")) {
+                    if (zone.contains(player.getLocation())) { inside = zone; break; }
+                    continue;
+                }
+                double dist = zone.distance(player.getLocation());
+                if (dist > zone.radius() * 1.3) continue;
+                boolean exposed = LabRegistry.lineOfSight(
+                    LabRegistry.sourceOf(zone, player.getWorld()), player.getEyeLocation());
+                if (!exposed) continue; // sealed chamber - nothing escapes
+                if (dist <= zone.radius()) { inside = zone; break; }
+                // Dangerously close to leaking radiation, but not in it yet
+                if (zone.type().equals("radiation") && !suited) metalTaste = true;
+            }
 
-            if (zone.type().equals("decon")) {
+            if (inside == null) {
+                if (metalTaste) player.sendActionBar(METAL_TASTE);
+                continue;
+            }
+
+            if (inside.type().equals("decon")) {
                 decontaminate(player);
                 continue;
             }
 
             if (suited) {
-                player.sendActionBar(Component.text("Hazmat suit protecting you ("
-                    + zone.type() + " zone)", NamedTextColor.GREEN));
+                // Radiation stays invisible even when protected; gas/cold you can feel
+                if (!inside.type().equals("radiation")) {
+                    player.sendActionBar(Component.text("Hazmat suit protecting you ("
+                        + inside.type() + " zone)", NamedTextColor.GREEN));
+                }
                 continue;
             }
 
-            switch (zone.type()) {
+            switch (inside.type()) {
                 case "toxic" -> {
                     player.addPotionEffect(new PotionEffect(PotionEffectType.POISON, 45, 0));
                     player.sendActionBar(Component.text("☠ TOXIC ZONE - get a hazmat suit!",
@@ -66,23 +97,24 @@ public final class HazardTask implements Runnable {
                     player.sendActionBar(Component.text("❄ CRYO ZONE - get a hazmat suit!",
                         NamedTextColor.AQUA));
                 }
-                default -> { // radiation
+                default -> { // radiation: damage + the taste, nothing else gives it away
                     player.addPotionEffect(new PotionEffect(PotionEffectType.WITHER, 45, 0));
-                    player.sendActionBar(Component.text("☢ RADIATION - get a hazmat suit!",
-                        NamedTextColor.RED));
+                    player.sendActionBar(METAL_TASTE);
                 }
             }
         }
 
-        // Sirens: any alarm-enabled zone with an unprotected player inside blares to
-        // everyone within 48 blocks of the zone (every 4 seconds - the horn is long).
+        // Sirens: any alarm-enabled zone with an unprotected, actually-exposed player inside
+        // blares to everyone within 48 blocks (every 4 seconds - the horn is long).
         if (tick % 4 != 0) return;
         for (Zone zone : registry.zones().values()) {
             if (!zone.alarm() || zone.type().equals("decon")) continue;
             World world = plugin.getServer().getWorld(zone.world());
             if (world == null) continue;
             boolean breach = plugin.getServer().getOnlinePlayers().stream()
-                .anyMatch(p -> zone.contains(p.getLocation()) && !registry.hasFullHazmat(p));
+                .anyMatch(p -> zone.contains(p.getLocation())
+                    && !registry.hasFullHazmat(p)
+                    && LabRegistry.lineOfSight(LabRegistry.sourceOf(zone, world), p.getEyeLocation()));
             if (!breach) continue;
             Location center = new Location(world, zone.x(), zone.y(), zone.z());
             for (Player near : world.getPlayers()) {

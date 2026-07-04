@@ -4,9 +4,11 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Color;
+import org.bukkit.FluidCollisionMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
+import org.bukkit.util.Vector;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
@@ -66,6 +68,25 @@ public final class LabRegistry {
     }
 
     public Map<String, Zone> zones() { return zones; }
+
+    /**
+     * Containment: hazard only travels in a straight, unblocked line. Walls and CLOSED
+     * doors block the ray; an OPEN door or any gap lets it through, because the ray tests
+     * the blocks' real collision shapes. So a sealed chamber keeps its radiation inside.
+     */
+    public static boolean lineOfSight(Location from, Location to) {
+        if (!from.getWorld().equals(to.getWorld())) return false;
+        Vector dir = to.toVector().subtract(from.toVector());
+        double length = dir.length();
+        if (length < 0.5) return true;
+        return from.getWorld().rayTraceBlocks(from, dir.normalize(), length,
+            FluidCollisionMode.NEVER, true) == null;
+    }
+
+    /** The point a zone radiates from: chest height above where its creator stood. */
+    public static Location sourceOf(Zone zone, org.bukkit.World world) {
+        return new Location(world, zone.x(), zone.y() + 1.2, zone.z());
+    }
 
     public boolean addZone(String name, String type, double radius, Location at) throws IOException {
         String key = name.toLowerCase();

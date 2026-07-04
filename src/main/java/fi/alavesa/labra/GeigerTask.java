@@ -37,18 +37,26 @@ public final class GeigerTask implements Runnable {
             if (!registry.isGeiger(player.getInventory().getItemInMainHand())
                 && !registry.isGeiger(player.getInventory().getItemInOffHand())) continue;
 
+            // Containment: a sealed chamber reads ZERO from outside - the counter only
+            // reacts through openings and open doors (line of sight from the source).
             double intensity = 0;
             for (Zone zone : registry.zones().values()) {
                 if (!zone.type().equals("radiation")) continue;
                 if (!zone.world().equals(player.getWorld().getName())) continue;
                 double reach = zone.radius() * 2;
                 double dist = zone.distance(player.getLocation());
-                if (dist < reach) intensity = Math.max(intensity, 1.0 - dist / reach);
+                if (dist < reach && LabRegistry.lineOfSight(
+                        LabRegistry.sourceOf(zone, player.getWorld()), player.getEyeLocation())) {
+                    intensity = Math.max(intensity, 1.0 - dist / reach);
+                }
             }
             for (Player carrier : carriers) {
                 if (carrier.getWorld() != player.getWorld()) continue;
                 double dist = carrier.getLocation().distance(player.getLocation());
-                if (dist < 12) intensity = Math.max(intensity, 1.0 - dist / 12.0);
+                if (dist < 12 && LabRegistry.lineOfSight(
+                        carrier.getEyeLocation(), player.getEyeLocation())) {
+                    intensity = Math.max(intensity, 1.0 - dist / 12.0);
+                }
             }
 
             if (intensity <= 0) {

@@ -25,11 +25,17 @@ Spigot) 1.21.4+ and Java 21. No datapack needed.
 
 - **Hazard zones** — spheres placed where you stand (`/lab zone add <name> <type> <radius>`,
   radius 1–64). Unprotected players inside get:
-  - `radiation`: wither + ☢ warning (and geiger counters react)
+  - `radiation`: wither — **no warning text**: only the geiger counter, the damage and a
+    gray *"I taste metal in my mouth..."* when dangerously close reveal it
   - `toxic`: poison + ☠ warning
   - `cryo`: freezing (powder-snow effect) + slowness + ❄ warning
   - `decon`: a **decontamination shower** — washes off poison, wither, slowness, glowing,
     fire and freezing with water spray (build it as an airlock room between lab sections)
+- **Containment** — hazards only travel in a straight, unblocked line from the zone center
+  (chest height above where you stood when creating it). **Walls and closed doors seal a
+  chamber completely**; open the door or leave a gap and it leaks out through the opening.
+  Geiger counters obey the same rule: a sealed chamber reads zero from outside. Place the
+  zone center in open air, not inside a block, or nothing escapes at all.
 - **Zone sirens** (`/lab zone alarm <name> on`) — while an unprotected player is inside an
   alarmed zone, a loud horn blares to everyone within 48 blocks. Containment breach!
 - **Hazmat suit** (`/lab give hazmat`) — 4-piece yellow suit; wearing ALL FOUR pieces makes
@@ -38,9 +44,9 @@ Spigot) 1.21.4+ and Java 21. No datapack needed.
   clear, clicks faster and faster as you approach a radiation zone (senses out to 2× the
   zone radius), and shows a µSv/h reading that goes green → yellow → red.
 - **Radioactive sample** (`/lab give sample`) — a portable radiation source: every geiger
-  counter within 12 blocks reacts to whoever carries it, and carrying it without a full
-  hazmat suit slowly withers you. Great for fetch-quest missions ("retrieve the sample from
-  the reactor room").
+  counter within 12 blocks (line of sight) reacts to whoever carries it, and carrying it
+  without a full hazmat suit slowly withers you — announced only by the metallic taste.
+  Great for fetch-quest missions ("retrieve the sample from the reactor room").
 
 ## Commands (`/lab`, alias `/labra`)
 
