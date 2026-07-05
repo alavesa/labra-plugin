@@ -5,8 +5,18 @@
 Lab gear for facility/SCP-style servers: **hazard zones** (radiation ☢ / toxic ☠ / cryo ❄),
 a **hazmat suit** that protects inside them, and a **geiger counter** that clicks faster the
 closer you get to radiation. Companion to
-[keycard-datapack](https://github.com/alavesa/keycard-datapack) and
-[guns-plugin](https://github.com/alavesa/guns-plugin).
+[keycard-datapack](https://github.com/alavesa/keycard-datapack),
+[guns-plugin](https://github.com/alavesa/guns-plugin) and
+[lab-datapack](https://github.com/alavesa/lab-datapack).
+
+## lab-datapack integration
+
+Run [lab-datapack](https://github.com/alavesa/lab-datapack) (chemistry: 118 elements,
+compounds, centrifuges, fridges) in the same world and the **full hazmat suit doubles as
+total immunity to the datapack's element hazards** — radiation from uranium in your pack,
+toxic metals in your bare hand, halogen fumes. The datapack reads this plugin's
+`labra:hazmat` item marker from NBT, so any Labra version works unchanged. Same rule as
+the zones: all four armor slots must be hazmat.
 
 ## Install
 
