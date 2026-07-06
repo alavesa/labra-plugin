@@ -13,13 +13,18 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
+import org.bukkit.event.inventory.PrepareAnvilEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import com.destroystokyo.paper.event.entity.EntityRemoveFromWorldEvent;
+import org.bukkit.inventory.AnvilInventory;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
+import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.inventory.view.AnvilView;
 
 import java.io.File;
 import java.io.IOException;
@@ -27,56 +32,28 @@ import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
 /**
- * GUIs for the lab-datapack machines (v0.14+). The datapack builds machines
- * the mob-spawner way (spawner block + item_display model + interaction
- * hitbox) and tags the interaction entity; this listener opens a real
- * inventory when one is right-clicked:
+ * GUIs for the lab-datapack machines. The datapack builds machines the
+ * mob-spawner way (spawner block + item_display model + interaction hitbox)
+ * and tags the interaction entity; this listener opens the interfaces:
  *
- *  - lab.creator : 54-slot "Compound Creator" with a Create Compound button.
- *                  Pressing it drops the contents inside the machine and runs
- *                  lab:creator/react as the crafting player (cold recipes).
- *  - lab.burner  : same, but lab:burner/react - the hot bench. No fuel needed.
- *  - lab.fridge  : persistent 27-slot cold storage (saved per machine UUID;
- *                  contents drop if the machine is destroyed)
- *  - lab.fuge    : 9-slot centrifuge feed; on close the contents drop into
- *                  the drum, where the datapack splits compound tubes
+ *  - lab.creator : 54-slot "Compound Creator" bench with a Create Compound
+ *                  button -> lab:creator/react as the crafting player
+ *  - lab.burner  : same bench, lab:burner/react - the hot side
+ *  - lab.fridge  : persistent 27-slot cold storage per machine UUID
+ *  - lab.fuge    : 9-slot centrifuge feed; contents drop into the drum on close
+ *  - lab.scp294  : an ANVIL prompt - type "CO", "Carbon Monoxide", "coffee"...
+ *                  and buy the cup for 2 Quarters
  */
 public final class MachineGuiListener implements Listener {
 
     private static final int BUTTON_SLOT = 49;
 
-    private enum Kind { FRIDGE, CENTRIFUGE, CREATOR, BURNER, SCP294 }
-
-    /** Everything SCP-294 can pour: dispatches lab:scp294/<key>. */
-    private record Liquid(String key, String name, int color) { }
-    private static final List<Liquid> LIQUIDS = List.of(
-        new Liquid("coffee", "Coffee", 0x4B2E1E),
-        new Liquid("cocoa", "Hot Chocolate", 0x7B4A12),
-        new Liquid("cola", "Regular Cola", 0x3B1F14),
-        new Liquid("estus", "Estus", 0xF5A623),
-        new Liquid("god", "god", 0xFFFFF0),
-        new Liquid("h2o", "Water", 0x3F76E4),
-        new Liquid("h2", "Hydrogen Gas", 0xE0FFFF),
-        new Liquid("o2", "Oxygen Gas", 0x99CCFF),
-        new Liquid("n2", "Nitrogen Gas", 0xCCDDFF),
-        new Liquid("h2o2", "Hydrogen Peroxide", 0xCFF3F0),
-        new Liquid("co2", "Carbon Dioxide", 0xAAAAAA),
-        new Liquid("co", "Carbon Monoxide", 0x666666),
-        new Liquid("ch4", "Methane", 0xBFFFBF),
-        new Liquid("nh3", "Ammonia", 0xD8FFD8),
-        new Liquid("nacl", "Salt", 0xFFFFFF),
-        new Liquid("hcl", "Hydrochloric Acid", 0xCCFF66),
-        new Liquid("naoh", "Lye", 0xF0F0FF),
-        new Liquid("so2", "Sulfur Dioxide", 0xFFFF99),
-        new Liquid("h2so4", "Sulfuric Acid", 0xFFFFCC),
-        new Liquid("ethanol", "Ethanol", 0xF5DEB3),
-        new Liquid("glucose", "Glucose", 0xFFE4B5),
-        new Liquid("fe2o3", "Rust", 0xB7410E),
-        new Liquid("sio2", "Silica", 0xE6E6FA));
+    private enum Kind { FRIDGE, CENTRIFUGE, CREATOR, BURNER }
 
     private static final class MachineHolder implements InventoryHolder {
         final Kind kind;
@@ -86,9 +63,44 @@ public final class MachineGuiListener implements Listener {
         @Override public Inventory getInventory() { return inventory; }
     }
 
+    /** Everything SCP-294 can pour: dispatches lab:scp294/<key>. */
+    private record Liquid(String key, String name, String formula, int color) { }
+    private static final List<Liquid> LIQUIDS = List.of(
+        new Liquid("coffee", "Coffee", null, 0x4B2E1E),
+        new Liquid("cocoa", "Hot Chocolate", null, 0x7B4A12),
+        new Liquid("cola", "Regular Cola", null, 0x3B1F14),
+        new Liquid("estus", "Estus", null, 0xF5A623),
+        new Liquid("god", "god", null, 0xFFFFF0),
+        new Liquid("h2o", "Water", "H2O", 0x3F76E4),
+        new Liquid("h2", "Hydrogen Gas", "H2", 0xE0FFFF),
+        new Liquid("o2", "Oxygen Gas", "O2", 0x99CCFF),
+        new Liquid("n2", "Nitrogen Gas", "N2", 0xCCDDFF),
+        new Liquid("h2o2", "Hydrogen Peroxide", "H2O2", 0xCFF3F0),
+        new Liquid("co2", "Carbon Dioxide", "CO2", 0xAAAAAA),
+        new Liquid("co", "Carbon Monoxide", "CO", 0x666666),
+        new Liquid("ch4", "Methane", "CH4", 0xBFFFBF),
+        new Liquid("nh3", "Ammonia", "NH3", 0xD8FFD8),
+        new Liquid("nacl", "Salt", "NaCl", 0xFFFFFF),
+        new Liquid("hcl", "Hydrochloric Acid", "HCl", 0xCCFF66),
+        new Liquid("naoh", "Lye", "NaOH", 0xF0F0FF),
+        new Liquid("so2", "Sulfur Dioxide", "SO2", 0xFFFF99),
+        new Liquid("h2so4", "Sulfuric Acid", "H2SO4", 0xFFFFCC),
+        new Liquid("ethanol", "Ethanol", "C2H5OH", 0xF5DEB3),
+        new Liquid("glucose", "Glucose", "C6H12O6", 0xFFE4B5),
+        new Liquid("fe2o3", "Rust", "Fe2O3", 0xB7410E),
+        new Liquid("sio2", "Silica", "SiO2", 0xE6E6FA));
+
+    /** One open SCP-294 anvil prompt: which machine, and what currently matches. */
+    private static final class Vending {
+        final UUID machine;
+        Liquid matched;
+        Vending(UUID machine) { this.machine = machine; }
+    }
+
     private final LabraPlugin plugin;
     private final File fridgeDir;
     private final Map<UUID, Inventory> openFridges = new HashMap<>();
+    private final Map<UUID, Vending> vendingSessions = new HashMap<>();
 
     public MachineGuiListener(LabraPlugin plugin) {
         this.plugin = plugin;
@@ -121,62 +133,11 @@ public final class MachineGuiListener implements Listener {
                 Component.text("Gas Burner", NamedTextColor.GOLD)));
         } else if (tags.contains("lab.scp294")) {
             event.setCancelled(true);
-            Inventory inv = freshInventory(Kind.SCP294, interaction, 54,
-                Component.text("SCP-294", NamedTextColor.DARK_GRAY));
-            for (int i = 0; i < LIQUIDS.size(); i++) {
-                inv.setItem(i, liquidButton(LIQUIDS.get(i)));
-            }
-            inv.setItem(53, coinSlotInfo());
-            player.openInventory(inv);
+            InventoryView view = player.openAnvil(null, true);
+            if (view == null) return;
+            vendingSessions.put(player.getUniqueId(), new Vending(interaction.getUniqueId()));
+            view.getTopInventory().setItem(0, vendingPrompt());
         }
-    }
-
-    private ItemStack liquidButton(Liquid liquid) {
-        ItemStack item = new ItemStack(Material.POTION);
-        org.bukkit.inventory.meta.PotionMeta meta =
-            (org.bukkit.inventory.meta.PotionMeta) item.getItemMeta();
-        meta.setColor(org.bukkit.Color.fromRGB(liquid.color()));
-        meta.itemName(Component.text(liquid.name(), NamedTextColor.WHITE)
-            .decoration(TextDecoration.ITALIC, false));
-        meta.lore(List.of(Component.text("2 Quarters - click to dispense.", NamedTextColor.GRAY)
-            .decoration(TextDecoration.ITALIC, false)));
-        meta.addItemFlags(org.bukkit.inventory.ItemFlag.HIDE_ADDITIONAL_TOOLTIP);
-        item.setItemMeta(meta);
-        return item;
-    }
-
-    private ItemStack coinSlotInfo() {
-        ItemStack item = new ItemStack(Material.IRON_NUGGET);
-        ItemMeta meta = item.getItemMeta();
-        meta.itemName(Component.text("Coin slot", NamedTextColor.GRAY)
-            .decoration(TextDecoration.ITALIC, false));
-        meta.lore(List.of(Component.text("Each drink costs 2 Quarters from your inventory.",
-            NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false)));
-        item.setItemMeta(meta);
-        return item;
-    }
-
-    private boolean isQuarter(ItemStack item) {
-        if (item == null || item.getType() != Material.IRON_NUGGET || !item.hasItemMeta()) return false;
-        return item.getItemMeta().getCustomModelDataComponent().getStrings().contains("lab_quarter");
-    }
-
-    private boolean takeQuarters(Player player, int amount) {
-        ItemStack[] contents = player.getInventory().getContents();
-        int found = 0;
-        for (ItemStack stack : contents) {
-            if (isQuarter(stack)) found += stack.getAmount();
-        }
-        if (found < amount) return false;
-        int left = amount;
-        for (ItemStack stack : contents) {
-            if (left == 0) break;
-            if (!isQuarter(stack)) continue;
-            int take = Math.min(left, stack.getAmount());
-            stack.setAmount(stack.getAmount() - take);
-            left -= take;
-        }
-        return true;
     }
 
     private Inventory freshInventory(Kind kind, Interaction machine, int size, Component title) {
@@ -223,37 +184,123 @@ public final class MachineGuiListener implements Listener {
         });
     }
 
-    // ------------------------------------------------------------- the button
+    // ------------------------------------------------------------- SCP-294
+
+    private ItemStack vendingPrompt() {
+        ItemStack item = new ItemStack(Material.PAPER);
+        ItemMeta meta = item.getItemMeta();
+        meta.itemName(Component.text("Type a drink...", NamedTextColor.GRAY)
+            .decoration(TextDecoration.ITALIC, false));
+        meta.lore(List.of(
+            Component.text("Formula or name: \"CO\", \"Carbon Monoxide\", \"coffee\"...",
+                NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false),
+            Component.text("2 Quarters per cup.", NamedTextColor.DARK_GRAY)
+                .decoration(TextDecoration.ITALIC, false)));
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    private Liquid match(String input) {
+        if (input == null) return null;
+        String wanted = input.trim().toLowerCase(Locale.ROOT).replace(" ", "");
+        if (wanted.isEmpty()) return null;
+        for (Liquid liquid : LIQUIDS) {
+            if (wanted.equals(liquid.key())) return liquid;
+            if (wanted.equals(liquid.name().toLowerCase(Locale.ROOT).replace(" ", ""))) return liquid;
+            if (liquid.formula() != null && wanted.equals(liquid.formula().toLowerCase(Locale.ROOT))) return liquid;
+        }
+        return null;
+    }
+
+    @EventHandler
+    public void onPrepareAnvil(PrepareAnvilEvent event) {
+        if (!(event.getViewers().isEmpty()) && event.getView().getPlayer() instanceof Player player) {
+            Vending session = vendingSessions.get(player.getUniqueId());
+            if (session == null) return;
+            AnvilView view = event.getView();
+            view.setRepairCost(0);
+            Liquid liquid = match(view.getRenameText());
+            session.matched = liquid;
+            if (liquid == null) {
+                ItemStack no = new ItemStack(Material.BARRIER);
+                ItemMeta meta = no.getItemMeta();
+                meta.itemName(Component.text("Out of range of its abilities", NamedTextColor.RED)
+                    .decoration(TextDecoration.ITALIC, false));
+                no.setItemMeta(meta);
+                event.setResult(no);
+                return;
+            }
+            ItemStack cup = new ItemStack(Material.POTION);
+            org.bukkit.inventory.meta.PotionMeta meta =
+                (org.bukkit.inventory.meta.PotionMeta) cup.getItemMeta();
+            meta.setColor(org.bukkit.Color.fromRGB(liquid.color()));
+            meta.itemName(Component.text("Dispense: " + liquid.name(), NamedTextColor.WHITE)
+                .decoration(TextDecoration.ITALIC, false));
+            meta.lore(List.of(Component.text("Click to pay 2 Quarters.", NamedTextColor.GRAY)
+                .decoration(TextDecoration.ITALIC, false)));
+            meta.addItemFlags(org.bukkit.inventory.ItemFlag.HIDE_ADDITIONAL_TOOLTIP);
+            cup.setItemMeta(meta);
+            event.setResult(cup);
+        }
+    }
+
+    private boolean isQuarter(ItemStack item) {
+        if (item == null || item.getType() != Material.IRON_NUGGET || !item.hasItemMeta()) return false;
+        return item.getItemMeta().getCustomModelDataComponent().getStrings().contains("lab_quarter");
+    }
+
+    private boolean takeQuarters(Player player, int amount) {
+        ItemStack[] contents = player.getInventory().getContents();
+        int found = 0;
+        for (ItemStack stack : contents) {
+            if (isQuarter(stack)) found += stack.getAmount();
+        }
+        if (found < amount) return false;
+        int left = amount;
+        for (ItemStack stack : contents) {
+            if (left == 0) break;
+            if (!isQuarter(stack)) continue;
+            int take = Math.min(left, stack.getAmount());
+            stack.setAmount(stack.getAmount() - take);
+            left -= take;
+        }
+        return true;
+    }
+
+    // ------------------------------------------------------------- clicks
 
     @EventHandler
     public void onClick(InventoryClickEvent event) {
-        if (!(event.getView().getTopInventory().getHolder() instanceof MachineHolder holder)) return;
-        if (holder.kind == Kind.SCP294) {
+        if (!(event.getWhoClicked() instanceof Player player)) return;
+
+        // SCP-294 anvil session: everything is locked except buying the result
+        Vending session = vendingSessions.get(player.getUniqueId());
+        if (session != null && event.getView().getTopInventory() instanceof AnvilInventory) {
             event.setCancelled(true);
             if (event.getClickedInventory() != event.getView().getTopInventory()) return;
-            if (event.getSlot() >= LIQUIDS.size()) return;
-            if (!(event.getWhoClicked() instanceof Player player)) return;
-            Entity machine = Bukkit.getEntity(holder.machine);
+            if (event.getSlot() != 2 || session.matched == null) return;
+            Entity machine = Bukkit.getEntity(session.machine);
             if (machine == null) { player.closeInventory(); return; }
             if (!takeQuarters(player, 2)) {
                 player.sendActionBar(Component.text("SCP-294 requires two Quarters.", NamedTextColor.GRAY));
                 player.playSound(player.getLocation(), org.bukkit.Sound.BLOCK_DISPENSER_FAIL, 0.7f, 0.9f);
                 return;
             }
-            Liquid liquid = LIQUIDS.get(event.getSlot());
             Location cell = machine.getLocation();
             player.playSound(machine.getLocation(), org.bukkit.Sound.BLOCK_STONE_BUTTON_CLICK_ON, 0.8f, 1.4f);
             Bukkit.dispatchCommand(Bukkit.getConsoleSender(),
                 "execute as " + player.getUniqueId() + " positioned "
                     + cell.getBlockX() + " " + cell.getBlockY() + " " + cell.getBlockZ()
-                    + " run function lab:scp294/" + liquid.key());
+                    + " run function lab:scp294/" + session.matched.key());
+            player.closeInventory();
             return;
         }
+
+        if (!(event.getView().getTopInventory().getHolder() instanceof MachineHolder holder)) return;
         if (holder.kind != Kind.CREATOR && holder.kind != Kind.BURNER) return;
         if (event.getClickedInventory() != event.getView().getTopInventory()) return;
         if (event.getSlot() != BUTTON_SLOT) return;
         event.setCancelled(true);
-        if (!(event.getWhoClicked() instanceof Player player)) return;
         Entity machine = Bukkit.getEntity(holder.machine);
         if (machine == null) { player.closeInventory(); return; }
 
@@ -286,6 +333,12 @@ public final class MachineGuiListener implements Listener {
 
     @EventHandler
     public void onClose(InventoryCloseEvent event) {
+        if (!(event.getPlayer() instanceof Player player)) return;
+        if (vendingSessions.remove(player.getUniqueId()) != null
+                && event.getInventory() instanceof AnvilInventory anvil) {
+            anvil.clear(); // the prompt paper is a ghost item, never dropped
+            return;
+        }
         if (!(event.getInventory().getHolder() instanceof MachineHolder holder)) return;
         Inventory inv = event.getInventory();
         if (event.getViewers().size() > 1) return; // someone else still looking
@@ -303,7 +356,6 @@ public final class MachineGuiListener implements Listener {
                 }
                 inv.clear();
             }
-            case SCP294 -> { } // buttons only - nothing to hand back
             case CREATOR, BURNER -> {
                 // closing without pressing the button: hand everything back
                 for (int slot = 0; slot < inv.getSize(); slot++) {
@@ -316,6 +368,11 @@ public final class MachineGuiListener implements Listener {
                 }
             }
         }
+    }
+
+    @EventHandler
+    public void onQuit(PlayerQuitEvent event) {
+        vendingSessions.remove(event.getPlayer().getUniqueId());
     }
 
     private Location machineDropSpot(UUID machine, Location fallback) {
