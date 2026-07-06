@@ -14,13 +14,15 @@ closer you get to radiation. Companion to
 Run [lab-datapack](https://github.com/alavesa/lab-datapack) (chemistry: 118 elements,
 compounds, centrifuges, fridges) in the same world and:
 
-- **Machine GUIs (v0.4.0+):** the datapack's spawner-method machines open real
-  inventories when right-clicked — a persistent 27-slot **Lab Fridge** (contents saved
-  per machine and dropped if it's destroyed), a **Centrifuge** feed whose contents fall
-  into the drum for splitting on close, and a **Gas Burner** fuel gauge (coal 60s /
-  coal block 540s) that manages the burn time and the `lab.lit` tag the datapack's
-  heat checks read. The plugin recognizes the machines by the `lab.fuge` / `lab.fridge`
-  / `lab.burner` tags on their interaction entities.
+- **Machine GUIs & lab commands (v0.5.0+):** the datapack's spawner-method machines
+  open real inventories when right-clicked — double-chest **Compound Creator** and
+  **Gas Burner** reaction benches with a *Create Compound* button (the burner is the
+  hot bench, no fuel needed), a persistent 27-slot **Lab Fridge** (contents saved per
+  machine and dropped if it's destroyed) and a **Centrifuge** feed whose contents fall
+  into the drum for splitting on close. The plugin recognizes machines by the tags on
+  their interaction entities, and `/lab place|give|removemachines|admin` is the staff
+  interface to the whole datapack — no `/function` needed. `lab.give` defaults to op
+  (built for RP servers where lab gear is staff-issued).
 - **Hazmat immunity:** the **full hazmat suit doubles as total immunity to the
   datapack's element hazards** — radiation from uranium in your pack, toxic metals in
   your bare hand, halogen fumes. The datapack reads this plugin's `labra:hazmat` item

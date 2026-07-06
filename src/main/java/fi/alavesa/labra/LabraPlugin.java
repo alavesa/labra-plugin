@@ -26,7 +26,6 @@ public final class LabraPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(machineGuis, this);
         getServer().getScheduler().runTaskTimer(this, new HazardTask(this, registry), 40L, 20L);
         getServer().getScheduler().runTaskTimer(this, new GeigerTask(this, registry), 40L, 5L);
-        getServer().getScheduler().runTaskTimer(this, machineGuis::tickBurners, 40L, 20L);
         getLogger().info("Labra enabled - zones: " + registry.zones().keySet());
     }
 
@@ -64,8 +63,53 @@ public final class LabraPlugin extends JavaPlugin {
                             sender.sendMessage(Component.text("Gave a radioactive sample to "
                                 + target.getName() + " - careful with it!", NamedTextColor.GREEN));
                         }
-                        default -> { return error(sender, "Unknown item. Items: hazmat, geiger, sample"); }
+                        // lab-datapack items: the plugin is the interface, the
+                        // datapack functions stay the engine
+                        case "kit", "rod", "pipette", "manual", "table" -> {
+                            if (!sender.hasPermission("lab.give")) return error(sender, "No permission.");
+                            runAs(target, "lab:give/" + args[1].toLowerCase());
+                            sender.sendMessage(Component.text("Gave lab " + args[1].toLowerCase()
+                                + " to " + target.getName(), NamedTextColor.AQUA));
+                        }
+                        case "element" -> {
+                            if (!sender.hasPermission("lab.give")) return error(sender, "No permission.");
+                            if (args.length < 4) return error(sender, "/lab give element <player> <symbol> [count]");
+                            String symbol = args[3].substring(0, 1).toUpperCase()
+                                + args[3].substring(1).toLowerCase();
+                            int count = 1;
+                            if (args.length >= 5) {
+                                try { count = Math.min(27, Math.max(1, Integer.parseInt(args[4]))); }
+                                catch (NumberFormatException e) { return error(sender, "Count must be a number."); }
+                            }
+                            for (int i = 0; i < count; i++) {
+                                runAs(target, "lab:e {s:\"" + symbol + "\"}");
+                            }
+                            sender.sendMessage(Component.text("Gave " + count + " x " + symbol
+                                + " to " + target.getName(), NamedTextColor.AQUA));
+                        }
+                        default -> { return error(sender, "Unknown item. Items: hazmat, geiger, sample, kit, rod, pipette, manual, table, element"); }
                     }
+                    return true;
+                }
+                case "place" -> {
+                    if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
+                    if (!(sender instanceof Player player)) return error(sender, "Players only (aim at the floor).");
+                    if (args.length < 2 || !MACHINES.contains(args[1].toLowerCase())) {
+                        return error(sender, "/lab place <" + String.join("|", MACHINES) + ">");
+                    }
+                    runAs(player, "lab:place/" + args[1].toLowerCase());
+                    return true;
+                }
+                case "removemachines", "dismantle" -> {
+                    if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
+                    if (!(sender instanceof Player player)) return error(sender, "Players only.");
+                    runAs(player, "lab:remove");
+                    return true;
+                }
+                case "admin" -> {
+                    if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
+                    if (!(sender instanceof Player player)) return error(sender, "Players only.");
+                    runAs(player, "lab:admin");
                     return true;
                 }
                 case "zone" -> {
@@ -141,10 +185,12 @@ public final class LabraPlugin extends JavaPlugin {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         return switch (args.length) {
-            case 1 -> filter(Stream.of("give", "zone", "reload"), args[0]);
+            case 1 -> filter(Stream.of("give", "zone", "place", "removemachines", "admin", "reload"), args[0]);
             case 2 -> switch (args[0].toLowerCase()) {
-                case "give" -> filter(Stream.of("hazmat", "geiger", "sample"), args[1]);
+                case "give" -> filter(Stream.of("hazmat", "geiger", "sample", "kit", "rod",
+                    "pipette", "manual", "table", "element"), args[1]);
                 case "zone" -> filter(Stream.of("add", "remove", "list", "alarm"), args[1]);
+                case "place" -> filter(MACHINES.stream(), args[1]);
                 default -> List.of();
             };
             case 3 -> args[0].equalsIgnoreCase("zone")
@@ -159,13 +205,23 @@ public final class LabraPlugin extends JavaPlugin {
         };
     }
 
+    private static final List<String> MACHINES =
+        List.of("creator", "burner", "centrifuge", "fridge", "rack");
+
+    /** Run a lab-datapack function as the given player (the datapack is the
+     *  engine; this command is the interface). */
+    private void runAs(Player player, String function) {
+        Bukkit.dispatchCommand(Bukkit.getConsoleSender(),
+            "execute as " + player.getUniqueId() + " at @s run function " + function);
+    }
+
     private List<String> filter(Stream<String> options, String prefix) {
         return options.filter(o -> o.startsWith(prefix.toLowerCase())).sorted().toList();
     }
 
     private boolean usage(CommandSender sender) {
         sender.sendMessage(Component.text(
-            "/lab give hazmat|geiger|sample [player] | zone add <name> <radiation|toxic|cryo|decon> <radius> | zone alarm <name> on|off | zone remove <name> | zone list | reload",
+            "/lab give hazmat|geiger|sample|kit|rod|pipette|manual|table [player] | give element <player> <symbol> [count] | place <creator|burner|centrifuge|fridge|rack> | removemachines | admin | zone add <name> <radiation|toxic|cryo|decon> <radius> | zone alarm <name> on|off | zone remove <name> | zone list | reload",
             NamedTextColor.AQUA));
         return true;
     }
