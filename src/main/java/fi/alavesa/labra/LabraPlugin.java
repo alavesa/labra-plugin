@@ -65,7 +65,8 @@ public final class LabraPlugin extends JavaPlugin {
                         }
                         // lab-datapack items: the plugin is the interface, the
                         // datapack functions stay the engine
-                        case "kit", "rod", "pipette", "manual", "table" -> {
+                        case "kit", "rod", "pipette", "manual", "table",
+                             "scp009", "scp999", "scp207", "scp148", "quarter" -> {
                             if (!sender.hasPermission("lab.give")) return error(sender, "No permission.");
                             runAs(target, "lab:give/" + args[1].toLowerCase());
                             sender.sendMessage(Component.text("Gave lab " + args[1].toLowerCase()
@@ -188,7 +189,8 @@ public final class LabraPlugin extends JavaPlugin {
             case 1 -> filter(Stream.of("give", "zone", "place", "removemachines", "admin", "reload"), args[0]);
             case 2 -> switch (args[0].toLowerCase()) {
                 case "give" -> filter(Stream.of("hazmat", "geiger", "sample", "kit", "rod",
-                    "pipette", "manual", "table", "element"), args[1]);
+                    "pipette", "manual", "table", "element",
+                    "scp009", "scp999", "scp207", "scp148", "quarter"), args[1]);
                 case "zone" -> filter(Stream.of("add", "remove", "list", "alarm"), args[1]);
                 case "place" -> filter(MACHINES.stream(), args[1]);
                 default -> List.of();
@@ -206,7 +208,7 @@ public final class LabraPlugin extends JavaPlugin {
     }
 
     private static final List<String> MACHINES =
-        List.of("creator", "burner", "centrifuge", "fridge", "rack");
+        List.of("creator", "burner", "centrifuge", "fridge", "rack", "scp294");
 
     /** Run a lab-datapack function as the given player (the datapack is the
      *  engine; this command is the interface). */

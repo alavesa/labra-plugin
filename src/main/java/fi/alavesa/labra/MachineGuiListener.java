@@ -49,7 +49,34 @@ public final class MachineGuiListener implements Listener {
 
     private static final int BUTTON_SLOT = 49;
 
-    private enum Kind { FRIDGE, CENTRIFUGE, CREATOR, BURNER }
+    private enum Kind { FRIDGE, CENTRIFUGE, CREATOR, BURNER, SCP294 }
+
+    /** Everything SCP-294 can pour: dispatches lab:scp294/<key>. */
+    private record Liquid(String key, String name, int color) { }
+    private static final List<Liquid> LIQUIDS = List.of(
+        new Liquid("coffee", "Coffee", 0x4B2E1E),
+        new Liquid("cocoa", "Hot Chocolate", 0x7B4A12),
+        new Liquid("cola", "Regular Cola", 0x3B1F14),
+        new Liquid("estus", "Estus", 0xF5A623),
+        new Liquid("god", "god", 0xFFFFF0),
+        new Liquid("h2o", "Water", 0x3F76E4),
+        new Liquid("h2", "Hydrogen Gas", 0xE0FFFF),
+        new Liquid("o2", "Oxygen Gas", 0x99CCFF),
+        new Liquid("n2", "Nitrogen Gas", 0xCCDDFF),
+        new Liquid("h2o2", "Hydrogen Peroxide", 0xCFF3F0),
+        new Liquid("co2", "Carbon Dioxide", 0xAAAAAA),
+        new Liquid("co", "Carbon Monoxide", 0x666666),
+        new Liquid("ch4", "Methane", 0xBFFFBF),
+        new Liquid("nh3", "Ammonia", 0xD8FFD8),
+        new Liquid("nacl", "Salt", 0xFFFFFF),
+        new Liquid("hcl", "Hydrochloric Acid", 0xCCFF66),
+        new Liquid("naoh", "Lye", 0xF0F0FF),
+        new Liquid("so2", "Sulfur Dioxide", 0xFFFF99),
+        new Liquid("h2so4", "Sulfuric Acid", 0xFFFFCC),
+        new Liquid("ethanol", "Ethanol", 0xF5DEB3),
+        new Liquid("glucose", "Glucose", 0xFFE4B5),
+        new Liquid("fe2o3", "Rust", 0xB7410E),
+        new Liquid("sio2", "Silica", 0xE6E6FA));
 
     private static final class MachineHolder implements InventoryHolder {
         final Kind kind;
@@ -92,7 +119,64 @@ public final class MachineGuiListener implements Listener {
             event.setCancelled(true);
             player.openInventory(benchInventory(Kind.BURNER, interaction,
                 Component.text("Gas Burner", NamedTextColor.GOLD)));
+        } else if (tags.contains("lab.scp294")) {
+            event.setCancelled(true);
+            Inventory inv = freshInventory(Kind.SCP294, interaction, 54,
+                Component.text("SCP-294", NamedTextColor.DARK_GRAY));
+            for (int i = 0; i < LIQUIDS.size(); i++) {
+                inv.setItem(i, liquidButton(LIQUIDS.get(i)));
+            }
+            inv.setItem(53, coinSlotInfo());
+            player.openInventory(inv);
         }
+    }
+
+    private ItemStack liquidButton(Liquid liquid) {
+        ItemStack item = new ItemStack(Material.POTION);
+        org.bukkit.inventory.meta.PotionMeta meta =
+            (org.bukkit.inventory.meta.PotionMeta) item.getItemMeta();
+        meta.setColor(org.bukkit.Color.fromRGB(liquid.color()));
+        meta.itemName(Component.text(liquid.name(), NamedTextColor.WHITE)
+            .decoration(TextDecoration.ITALIC, false));
+        meta.lore(List.of(Component.text("2 Quarters - click to dispense.", NamedTextColor.GRAY)
+            .decoration(TextDecoration.ITALIC, false)));
+        meta.addItemFlags(org.bukkit.inventory.ItemFlag.HIDE_ADDITIONAL_TOOLTIP);
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    private ItemStack coinSlotInfo() {
+        ItemStack item = new ItemStack(Material.IRON_NUGGET);
+        ItemMeta meta = item.getItemMeta();
+        meta.itemName(Component.text("Coin slot", NamedTextColor.GRAY)
+            .decoration(TextDecoration.ITALIC, false));
+        meta.lore(List.of(Component.text("Each drink costs 2 Quarters from your inventory.",
+            NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false)));
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    private boolean isQuarter(ItemStack item) {
+        if (item == null || item.getType() != Material.IRON_NUGGET || !item.hasItemMeta()) return false;
+        return item.getItemMeta().getCustomModelDataComponent().getStrings().contains("lab_quarter");
+    }
+
+    private boolean takeQuarters(Player player, int amount) {
+        ItemStack[] contents = player.getInventory().getContents();
+        int found = 0;
+        for (ItemStack stack : contents) {
+            if (isQuarter(stack)) found += stack.getAmount();
+        }
+        if (found < amount) return false;
+        int left = amount;
+        for (ItemStack stack : contents) {
+            if (left == 0) break;
+            if (!isQuarter(stack)) continue;
+            int take = Math.min(left, stack.getAmount());
+            stack.setAmount(stack.getAmount() - take);
+            left -= take;
+        }
+        return true;
     }
 
     private Inventory freshInventory(Kind kind, Interaction machine, int size, Component title) {
@@ -144,6 +228,27 @@ public final class MachineGuiListener implements Listener {
     @EventHandler
     public void onClick(InventoryClickEvent event) {
         if (!(event.getView().getTopInventory().getHolder() instanceof MachineHolder holder)) return;
+        if (holder.kind == Kind.SCP294) {
+            event.setCancelled(true);
+            if (event.getClickedInventory() != event.getView().getTopInventory()) return;
+            if (event.getSlot() >= LIQUIDS.size()) return;
+            if (!(event.getWhoClicked() instanceof Player player)) return;
+            Entity machine = Bukkit.getEntity(holder.machine);
+            if (machine == null) { player.closeInventory(); return; }
+            if (!takeQuarters(player, 2)) {
+                player.sendActionBar(Component.text("SCP-294 requires two Quarters.", NamedTextColor.GRAY));
+                player.playSound(player.getLocation(), org.bukkit.Sound.BLOCK_DISPENSER_FAIL, 0.7f, 0.9f);
+                return;
+            }
+            Liquid liquid = LIQUIDS.get(event.getSlot());
+            Location cell = machine.getLocation();
+            player.playSound(machine.getLocation(), org.bukkit.Sound.BLOCK_STONE_BUTTON_CLICK_ON, 0.8f, 1.4f);
+            Bukkit.dispatchCommand(Bukkit.getConsoleSender(),
+                "execute as " + player.getUniqueId() + " positioned "
+                    + cell.getBlockX() + " " + cell.getBlockY() + " " + cell.getBlockZ()
+                    + " run function lab:scp294/" + liquid.key());
+            return;
+        }
         if (holder.kind != Kind.CREATOR && holder.kind != Kind.BURNER) return;
         if (event.getClickedInventory() != event.getView().getTopInventory()) return;
         if (event.getSlot() != BUTTON_SLOT) return;
@@ -198,6 +303,7 @@ public final class MachineGuiListener implements Listener {
                 }
                 inv.clear();
             }
+            case SCP294 -> { } // buttons only - nothing to hand back
             case CREATOR, BURNER -> {
                 // closing without pressing the button: hand everything back
                 for (int slot = 0; slot < inv.getSize(); slot++) {
