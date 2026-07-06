@@ -16,14 +16,23 @@ import java.util.stream.Stream;
 public final class LabraPlugin extends JavaPlugin {
 
     private LabRegistry registry;
+    private MachineGuiListener machineGuis;
 
     @Override
     public void onEnable() {
         registry = new LabRegistry(this);
         registry.load();
+        machineGuis = new MachineGuiListener(this);
+        getServer().getPluginManager().registerEvents(machineGuis, this);
         getServer().getScheduler().runTaskTimer(this, new HazardTask(this, registry), 40L, 20L);
         getServer().getScheduler().runTaskTimer(this, new GeigerTask(this, registry), 40L, 5L);
+        getServer().getScheduler().runTaskTimer(this, machineGuis::tickBurners, 40L, 20L);
         getLogger().info("Labra enabled - zones: " + registry.zones().keySet());
+    }
+
+    @Override
+    public void onDisable() {
+        if (machineGuis != null) machineGuis.shutdown();
     }
 
     @Override
