@@ -8,12 +8,19 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scoreboard.Objective;
 
 import java.io.IOException;
 import java.util.List;
 import java.util.stream.Stream;
 
 public final class LabraPlugin extends JavaPlugin {
+
+    /** Minimum lab-datapack version (the #datapack marker in lab.var that its
+     *  load function writes). Commands that dispatch into the datapack check
+     *  this first, so a missing/stale datapack fails LOUDLY instead of
+     *  dispatching functions that silently don't exist. */
+    private static final int DATAPACK_VERSION = 19;
 
     private LabRegistry registry;
     private MachineGuiListener machineGuis;
@@ -28,6 +35,13 @@ public final class LabraPlugin extends JavaPlugin {
         getServer().getScheduler().runTaskTimer(this, new HazardTask(this, registry), 40L, 20L);
         getServer().getScheduler().runTaskTimer(this, new GeigerTask(this, registry), 40L, 5L);
         getLogger().info("Labra enabled - zones: " + registry.zones().keySet());
+        getServer().getScheduler().runTaskLater(this, () -> {
+            if (datapackVersion() < DATAPACK_VERSION) {
+                getLogger().warning("lab-datapack v0.19+ NOT detected in this world - /lab give/place");
+                getLogger().warning("will refuse to run. Install Lab.zip from");
+                getLogger().warning("github.com/alavesa/lab-datapack/releases into world/datapacks/.");
+            }
+        }, 100L);
     }
 
     @Override
@@ -42,6 +56,9 @@ public final class LabraPlugin extends JavaPlugin {
             switch (args[0].toLowerCase()) {
                 case "give" -> {
                     if (args.length < 2) return usage(sender);
+                    // datapack-backed items are checked before anything else, so a
+                    // missing/stale datapack is reported instead of failing silently
+                    if (DATAPACK_ITEMS.contains(args[1].toLowerCase()) && !datapackReady(sender)) return true;
                     Player target = args.length >= 3 ? Bukkit.getPlayerExact(args[2])
                         : (sender instanceof Player p ? p : null);
                     if (target == null) return error(sender, "Player not found.");
@@ -99,6 +116,7 @@ public final class LabraPlugin extends JavaPlugin {
                     if (args.length < 2 || !MACHINES.contains(args[1].toLowerCase())) {
                         return error(sender, "/lab place <" + String.join("|", MACHINES) + ">");
                     }
+                    if (!datapackReady(sender)) return true;
                     runAs(player, "lab:place/" + args[1].toLowerCase());
                     return true;
                 }
@@ -210,6 +228,32 @@ public final class LabraPlugin extends JavaPlugin {
 
     private static final List<String> MACHINES =
         List.of("creator", "burner", "centrifuge", "fridge", "rack", "scp294");
+
+    /** /lab give items served by the datapack (everything except the plugin's
+     *  own hazmat/geiger/sample). */
+    private static final List<String> DATAPACK_ITEMS =
+        List.of("kit", "rod", "pipette", "manual", "table", "element",
+            "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "quarter");
+
+    /** The lab-datapack's load function writes its version to #datapack in
+     *  lab.var. No marker (or an old one) means dispatched functions would
+     *  fail silently - so refuse up front and say why. */
+    private int datapackVersion() {
+        Objective obj = Bukkit.getScoreboardManager().getMainScoreboard().getObjective("lab.var");
+        if (obj == null) return 0;
+        var score = obj.getScore("#datapack");
+        return score.isScoreSet() ? score.getScore() : 0;
+    }
+
+    private boolean datapackReady(CommandSender sender) {
+        int version = datapackVersion();
+        if (version >= DATAPACK_VERSION) return true;
+        error(sender, version == 0
+            ? "The lab-datapack is missing from this world - nothing to give."
+            : "The lab-datapack in this world is outdated (v0." + version + ", need v0." + DATAPACK_VERSION + "+).");
+        error(sender, "Get Lab.zip from github.com/alavesa/lab-datapack/releases, extract into world/datapacks/, then /minecraft:reload.");
+        return false;
+    }
 
     /** Run a lab-datapack function as the given player (the datapack is the
      *  engine; this command is the interface). */
