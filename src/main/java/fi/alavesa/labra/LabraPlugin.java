@@ -24,6 +24,7 @@ public final class LabraPlugin extends JavaPlugin {
         registry.load();
         machineGuis = new MachineGuiListener(this);
         getServer().getPluginManager().registerEvents(machineGuis, this);
+        getServer().getPluginManager().registerEvents(new Scp008Listener(this), this);
         getServer().getScheduler().runTaskTimer(this, new HazardTask(this, registry), 40L, 20L);
         getServer().getScheduler().runTaskTimer(this, new GeigerTask(this, registry), 40L, 5L);
         getLogger().info("Labra enabled - zones: " + registry.zones().keySet());
@@ -66,7 +67,7 @@ public final class LabraPlugin extends JavaPlugin {
                         // lab-datapack items: the plugin is the interface, the
                         // datapack functions stay the engine
                         case "kit", "rod", "pipette", "manual", "table",
-                             "scp009", "scp999", "scp207", "scp148", "quarter" -> {
+                             "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "quarter" -> {
                             if (!sender.hasPermission("lab.give")) return error(sender, "No permission.");
                             runAs(target, "lab:give/" + args[1].toLowerCase());
                             sender.sendMessage(Component.text("Gave lab " + args[1].toLowerCase()
@@ -190,7 +191,7 @@ public final class LabraPlugin extends JavaPlugin {
             case 2 -> switch (args[0].toLowerCase()) {
                 case "give" -> filter(Stream.of("hazmat", "geiger", "sample", "kit", "rod",
                     "pipette", "manual", "table", "element",
-                    "scp009", "scp999", "scp207", "scp148", "quarter"), args[1]);
+                    "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "quarter"), args[1]);
                 case "zone" -> filter(Stream.of("add", "remove", "list", "alarm"), args[1]);
                 case "place" -> filter(MACHINES.stream(), args[1]);
                 default -> List.of();
