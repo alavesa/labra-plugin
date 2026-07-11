@@ -24,7 +24,7 @@ public final class LabraPlugin extends JavaPlugin {
         registry.load();
         machineGuis = new MachineGuiListener(this);
         getServer().getPluginManager().registerEvents(machineGuis, this);
-        getServer().getPluginManager().registerEvents(new Scp008Listener(this), this);
+        getServer().getPluginManager().registerEvents(new Scp008Listener(this, registry), this);
         getServer().getScheduler().runTaskTimer(this, new HazardTask(this, registry), 40L, 20L);
         getServer().getScheduler().runTaskTimer(this, new GeigerTask(this, registry), 40L, 5L);
         getLogger().info("Labra enabled - zones: " + registry.zones().keySet());

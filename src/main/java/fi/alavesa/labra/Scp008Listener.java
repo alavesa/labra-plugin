@@ -20,15 +20,20 @@ import org.bukkit.scoreboard.Objective;
  * The sharp end of SCP-008. The lab-datapack owns the disease itself (the
  * lab.z008 timeline, the SCP-500 cure); this listener adds what a datapack
  * cannot: STABBING - hitting another player while holding the syringe infects
- * them and spends the syringe - and the ending: any player who dies while
- * infected gets back up as an SCP-008 Host, right where they fell.
+ * them and spends the syringe - the ending: any player who dies while
+ * infected gets back up as an SCP-008 Host (wearing their name), right where
+ * they fell - and the SPREADING: host claws infect on hit, unless a full
+ * hazmat suit is between the claw and the skin. The suit is not forever:
+ * every blocked hit chews a random piece, and pieces tear off entirely.
  */
 public final class Scp008Listener implements Listener {
 
     private final LabraPlugin plugin;
+    private final LabRegistry registry;
 
-    public Scp008Listener(LabraPlugin plugin) {
+    public Scp008Listener(LabraPlugin plugin, LabRegistry registry) {
         this.plugin = plugin;
+        this.registry = registry;
     }
 
     private boolean isSyringe(ItemStack item) {
@@ -51,6 +56,28 @@ public final class Scp008Listener implements Listener {
             NamedTextColor.GRAY, TextDecoration.ITALIC));
     }
 
+    /** A host's claws carry the prion. Hazmat blocks it - while it lasts. */
+    @EventHandler
+    public void onHostClaw(EntityDamageByEntityEvent event) {
+        if (!(event.getDamager() instanceof Zombie zombie)) return;
+        if (!zombie.getScoreboardTags().contains("scp008.host")) return;
+        if (!(event.getEntity() instanceof Player victim)) return;
+        if (registry.hasFullHazmat(victim)) {
+            switch (registry.wearHazmat(victim)) {
+                case 0 -> victim.sendActionBar(Component.text("Claws rake across the suit.",
+                    NamedTextColor.GRAY, TextDecoration.ITALIC));
+                case 1 -> {
+                    victim.getWorld().playSound(victim.getLocation(), Sound.ENTITY_ITEM_BREAK, 1f, 0.8f);
+                    victim.sendActionBar(Component.text("The suit tears open.",
+                        NamedTextColor.RED, TextDecoration.ITALIC));
+                }
+            }
+            return;
+        }
+        Bukkit.dispatchCommand(Bukkit.getConsoleSender(),
+            "execute as " + victim.getUniqueId() + " run function lab:scp008/infect");
+    }
+
     /** Dying while infected is not the end of the story. */
     @EventHandler
     public void onDeath(PlayerDeathEvent event) {
@@ -66,7 +93,8 @@ public final class Scp008Listener implements Listener {
             zombie.setPersistent(true);
             zombie.setRemoveWhenFarAway(false);
             zombie.setShouldBurnInDay(false);
-            zombie.customName(Component.text("SCP-008 Host", NamedTextColor.DARK_GREEN));
+            // the fallen player, back on their feet - the name makes it personal
+            zombie.customName(Component.text(victim.getName(), NamedTextColor.DARK_GREEN));
             zombie.setCustomNameVisible(false);
             zombie.addScoreboardTag("scp008.host");
         });

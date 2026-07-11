@@ -22,9 +22,11 @@ import org.bukkit.plugin.Plugin;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 
 /** Loads/saves lab.yml zones and builds the lab items (hazmat pieces, geiger counter). */
 public final class LabRegistry {
@@ -33,6 +35,7 @@ public final class LabRegistry {
 
     private final Plugin plugin;
     private final NamespacedKey hazmatKey;
+    private final NamespacedKey wearKey;
     private final NamespacedKey geigerKey;
     private final NamespacedKey sampleKey;
     private final Map<String, Zone> zones = new LinkedHashMap<>();
@@ -42,6 +45,7 @@ public final class LabRegistry {
     public LabRegistry(Plugin plugin) {
         this.plugin = plugin;
         this.hazmatKey = new NamespacedKey(plugin, "hazmat");
+        this.wearKey = new NamespacedKey(plugin, "hazmat_wear");
         this.geigerKey = new NamespacedKey(plugin, "geiger");
         this.sampleKey = new NamespacedKey(plugin, "sample");
     }
@@ -196,6 +200,38 @@ public final class LabRegistry {
             }
         }
         return true;
+    }
+
+    /** One SCP-008 Host claw hit chews the worn suit: a random hazmat piece
+     *  takes a point of wear and tears clean off after six (the pieces are
+     *  unbreakable, so host claws are the ONLY thing that wears them out).
+     *  Returns 1 if a piece was destroyed, 0 if the suit just took wear,
+     *  -1 if no hazmat is worn at all. */
+    public int wearHazmat(Player player) {
+        ItemStack[] armor = player.getInventory().getArmorContents();
+        List<Integer> worn = new ArrayList<>();
+        for (int i = 0; i < armor.length; i++) {
+            ItemStack piece = armor[i];
+            if (piece != null && piece.hasItemMeta()
+                && piece.getItemMeta().getPersistentDataContainer().has(hazmatKey, PersistentDataType.BYTE)) {
+                worn.add(i);
+            }
+        }
+        if (worn.isEmpty()) return -1;
+        int slot = worn.get(ThreadLocalRandom.current().nextInt(worn.size()));
+        ItemStack piece = armor[slot];
+        ItemMeta meta = piece.getItemMeta();
+        int wear = meta.getPersistentDataContainer()
+            .getOrDefault(wearKey, PersistentDataType.INTEGER, 0) + 1;
+        if (wear >= 6) {
+            armor[slot] = null;
+            player.getInventory().setArmorContents(armor);
+            return 1;
+        }
+        meta.getPersistentDataContainer().set(wearKey, PersistentDataType.INTEGER, wear);
+        piece.setItemMeta(meta);
+        player.getInventory().setArmorContents(armor);
+        return 0;
     }
 
     public boolean isGeiger(ItemStack item) {
