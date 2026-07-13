@@ -20,7 +20,7 @@ public final class LabraPlugin extends JavaPlugin {
      *  load function writes). Commands that dispatch into the datapack check
      *  this first, so a missing/stale datapack fails LOUDLY instead of
      *  dispatching functions that silently don't exist. */
-    private static final int DATAPACK_VERSION = 19;
+    private static final int DATAPACK_VERSION = 20;
 
     private LabRegistry registry;
     private MachineGuiListener machineGuis;
@@ -32,12 +32,29 @@ public final class LabraPlugin extends JavaPlugin {
         machineGuis = new MachineGuiListener(this);
         getServer().getPluginManager().registerEvents(machineGuis, this);
         getServer().getPluginManager().registerEvents(new Scp008Listener(this, registry), this);
+        Scp268Listener scp268 = new Scp268Listener(this);
+        Scp1499Listener scp1499 = new Scp1499Listener(this, registry);
+        Scp714Listener scp714 = new Scp714Listener(this);
+        Scp427Listener scp427 = new Scp427Listener(this);
+        Scp1033Listener scp1033 = new Scp1033Listener(this);
+        getServer().getPluginManager().registerEvents(scp268, this);
+        getServer().getPluginManager().registerEvents(scp1499, this);
+        getServer().getPluginManager().registerEvents(scp714, this);
+        getServer().getPluginManager().registerEvents(scp427, this);
+        getServer().getPluginManager().registerEvents(scp1033, this);
+        getServer().getPluginManager().registerEvents(new Scp018Listener(this), this);
+        getServer().getPluginManager().registerEvents(new Scp038Listener(this), this);
         getServer().getScheduler().runTaskTimer(this, new HazardTask(this, registry), 40L, 20L);
         getServer().getScheduler().runTaskTimer(this, new GeigerTask(this, registry), 40L, 5L);
+        getServer().getScheduler().runTaskTimer(this, scp268, 40L, 20L);
+        getServer().getScheduler().runTaskTimer(this, scp1499, 40L, 20L);
+        getServer().getScheduler().runTaskTimer(this, scp714, 40L, 20L);
+        getServer().getScheduler().runTaskTimer(this, scp427, 40L, 20L);
+        getServer().getScheduler().runTaskTimer(this, scp1033, 40L, 20L);
         getLogger().info("Labra enabled - zones: " + registry.zones().keySet());
         getServer().getScheduler().runTaskLater(this, () -> {
             if (datapackVersion() < DATAPACK_VERSION) {
-                getLogger().warning("lab-datapack v0.19+ NOT detected in this world - /lab give/place");
+                getLogger().warning("lab-datapack v0.20+ NOT detected in this world - /lab give/place");
                 getLogger().warning("will refuse to run. Install Lab.zip from");
                 getLogger().warning("github.com/alavesa/lab-datapack/releases into world/datapacks/.");
             }
@@ -84,7 +101,8 @@ public final class LabraPlugin extends JavaPlugin {
                         // lab-datapack items: the plugin is the interface, the
                         // datapack functions stay the engine
                         case "kit", "rod", "pipette", "manual", "table",
-                             "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "quarter" -> {
+                             "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "quarter",
+                             "scp268", "scp1499", "scp714", "scp018", "scp427", "scp1033" -> {
                             if (!sender.hasPermission("lab.give")) return error(sender, "No permission.");
                             runAs(target, "lab:give/" + args[1].toLowerCase());
                             sender.sendMessage(Component.text("Gave lab " + args[1].toLowerCase()
@@ -187,6 +205,29 @@ public final class LabraPlugin extends JavaPlugin {
                         default -> { return usage(sender); }
                     }
                 }
+                case "scp1499" -> {
+                    if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
+                    if (args.length < 2) return error(sender, "/lab scp1499 sethere|info");
+                    switch (args[1].toLowerCase()) {
+                        case "sethere" -> {
+                            if (!(sender instanceof Player player)) return error(sender, "Players only (the anchor is set where you stand).");
+                            registry.setScp1499Anchor(player.getLocation());
+                            sender.sendMessage(Component.text("SCP-1499 anchor set where you stand. The mask now leads here.",
+                                NamedTextColor.AQUA));
+                        }
+                        case "info" -> {
+                            var anchor = registry.scp1499Anchor();
+                            sender.sendMessage(anchor == null
+                                ? Component.text("SCP-1499 anchor: not set (/lab scp1499 sethere). The mask does nothing.",
+                                    NamedTextColor.GRAY)
+                                : Component.text("SCP-1499 anchor: " + (int) anchor.getX() + " " + (int) anchor.getY()
+                                    + " " + (int) anchor.getZ() + " (" + anchor.getWorld().getName() + ")",
+                                    NamedTextColor.AQUA));
+                        }
+                        default -> { return error(sender, "/lab scp1499 sethere|info"); }
+                    }
+                    return true;
+                }
                 case "reload" -> {
                     if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
                     registry.load();
@@ -205,12 +246,14 @@ public final class LabraPlugin extends JavaPlugin {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         return switch (args.length) {
-            case 1 -> filter(Stream.of("give", "zone", "place", "removemachines", "admin", "reload"), args[0]);
+            case 1 -> filter(Stream.of("give", "zone", "place", "removemachines", "admin", "scp1499", "reload"), args[0]);
             case 2 -> switch (args[0].toLowerCase()) {
                 case "give" -> filter(Stream.of("hazmat", "geiger", "sample", "kit", "rod",
                     "pipette", "manual", "table", "element",
-                    "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "quarter"), args[1]);
+                    "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "quarter",
+                    "scp268", "scp1499", "scp714", "scp018", "scp427", "scp1033"), args[1]);
                 case "zone" -> filter(Stream.of("add", "remove", "list", "alarm"), args[1]);
+                case "scp1499" -> filter(Stream.of("sethere", "info"), args[1]);
                 case "place" -> filter(MACHINES.stream(), args[1]);
                 default -> List.of();
             };
@@ -227,13 +270,14 @@ public final class LabraPlugin extends JavaPlugin {
     }
 
     private static final List<String> MACHINES =
-        List.of("creator", "burner", "centrifuge", "fridge", "rack", "scp294");
+        List.of("creator", "burner", "centrifuge", "fridge", "rack", "scp294", "scp038");
 
     /** /lab give items served by the datapack (everything except the plugin's
      *  own hazmat/geiger/sample). */
     private static final List<String> DATAPACK_ITEMS =
         List.of("kit", "rod", "pipette", "manual", "table", "element",
-            "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "quarter");
+            "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "quarter",
+            "scp268", "scp1499", "scp714", "scp018", "scp427", "scp1033");
 
     /** The lab-datapack's load function writes its version to #datapack in
      *  lab.var. No marker (or an old one) means dispatched functions would
@@ -268,7 +312,7 @@ public final class LabraPlugin extends JavaPlugin {
 
     private boolean usage(CommandSender sender) {
         sender.sendMessage(Component.text(
-            "/lab give hazmat|geiger|sample|kit|rod|pipette|manual|table [player] | give element <player> <symbol> [count] | place <creator|burner|centrifuge|fridge|rack> | removemachines | admin | zone add <name> <radiation|toxic|cryo|decon> <radius> | zone alarm <name> on|off | zone remove <name> | zone list | reload",
+            "/lab give hazmat|geiger|sample|kit|rod|pipette|manual|table|scp... [player] | give element <player> <symbol> [count] | place <" + String.join("|", MACHINES) + "> | removemachines | admin | scp1499 sethere|info | zone add <name> <radiation|toxic|cryo|decon> <radius> | zone alarm <name> on|off | zone remove <name> | zone list | reload",
             NamedTextColor.AQUA));
         return true;
     }

@@ -3,7 +3,9 @@ package fi.alavesa.labra;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
+import org.bukkit.Bukkit;
 import org.bukkit.Color;
+import org.bukkit.World;
 import org.bukkit.FluidCollisionMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -42,6 +44,13 @@ public final class LabRegistry {
     private File file;
     private YamlConfiguration yaml;
 
+    // SCP-1499's dimension anchor (where the mask takes you). Stored raw so a
+    // not-yet-loaded world doesn't lose the setting; resolved on each use.
+    private boolean anchor1499Set;
+    private String anchor1499World;
+    private double anchor1499X, anchor1499Y, anchor1499Z;
+    private float anchor1499Yaw, anchor1499Pitch;
+
     public LabRegistry(Plugin plugin) {
         this.plugin = plugin;
         this.hazmatKey = new NamespacedKey(plugin, "hazmat");
@@ -55,6 +64,16 @@ public final class LabRegistry {
         if (!file.exists()) plugin.saveResource("lab.yml", false);
         yaml = YamlConfiguration.loadConfiguration(file);
         zones.clear();
+        ConfigurationSection mask = yaml.getConfigurationSection("scp1499");
+        anchor1499Set = mask != null;
+        if (mask != null) {
+            anchor1499World = mask.getString("world", "world");
+            anchor1499X = mask.getDouble("x");
+            anchor1499Y = mask.getDouble("y");
+            anchor1499Z = mask.getDouble("z");
+            anchor1499Yaw = (float) mask.getDouble("yaw");
+            anchor1499Pitch = (float) mask.getDouble("pitch");
+        }
         ConfigurationSection root = yaml.getConfigurationSection("zones");
         if (root == null) return;
         for (String name : root.getKeys(false)) {
@@ -124,6 +143,26 @@ public final class LabRegistry {
         yaml.save(file);
         load();
         return true;
+    }
+
+    /** Where SCP-1499 takes its wearer, or null if not configured (or the
+     *  world isn't loaded). Set with /lab scp1499 sethere. */
+    public Location scp1499Anchor() {
+        if (!anchor1499Set) return null;
+        World world = Bukkit.getWorld(anchor1499World);
+        if (world == null) return null;
+        return new Location(world, anchor1499X, anchor1499Y, anchor1499Z, anchor1499Yaw, anchor1499Pitch);
+    }
+
+    public void setScp1499Anchor(Location at) throws IOException {
+        yaml.set("scp1499.world", at.getWorld().getName());
+        yaml.set("scp1499.x", at.getX());
+        yaml.set("scp1499.y", at.getY());
+        yaml.set("scp1499.z", at.getZ());
+        yaml.set("scp1499.yaw", (double) at.getYaw());
+        yaml.set("scp1499.pitch", (double) at.getPitch());
+        yaml.save(file);
+        load();
     }
 
     /** The four hazmat pieces: yellow leather armor, custom model ids hazmat_helmet etc. */

@@ -7,5 +7,16 @@
 #   cryo      - freezing (powder snow effect) + slowness inside
 #
 # A full hazmat suit (all 4 pieces, /lab give hazmat) protects from all zone types.
+#
+# SCP-1499's pocket dimension anchor is stored here too, set in-game with
+# /lab scp1499 sethere (check with /lab scp1499 info):
+#
+#   scp1499:
+#     world: world
+#     x: 0.0
+#     y: 64.0
+#     z: 0.0
+#     yaw: 0.0
+#     pitch: 0.0
 
 zones: {}

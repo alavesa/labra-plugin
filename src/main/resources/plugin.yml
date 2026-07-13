@@ -1,5 +1,5 @@
 name: Labra
-version: '0.9.1'
+version: '0.10.0'
 main: fi.alavesa.labra.LabraPlugin
 api-version: '1.21'
 author: Piia Alavesa
@@ -9,9 +9,11 @@ commands:
     description: Lab commands - give, zone, reload
     usage: |
       /lab give hazmat|geiger|sample|kit|rod|pipette|manual|table [player]
+      /lab give scp268|scp1499|scp714|scp018|scp427|scp1033|scp... [player]
       /lab give element <player> <symbol> [count]
-      /lab place <creator|burner|centrifuge|fridge|rack>
+      /lab place <creator|burner|centrifuge|fridge|rack|scp294|scp038>
       /lab removemachines | /lab admin
+      /lab scp1499 sethere|info
       /lab zone add <name> <radiation|toxic|cryo> <radius>
       /lab zone remove <name> | list | alarm <name> on|off
       /lab reload
