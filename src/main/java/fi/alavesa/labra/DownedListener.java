@@ -3,7 +3,10 @@ package fi.alavesa.labra;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
+import org.bukkit.Color;
+import org.bukkit.Particle;
 import org.bukkit.Sound;
+import org.bukkit.entity.Pose;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -74,7 +77,9 @@ public final class DownedListener implements Listener, Runnable {
         event.setCancelled(true);
         victim.setHealth(1.0);
         downed.put(victim.getUniqueId(), System.currentTimeMillis() + BLEED_OUT_MS);
+        victim.setPose(Pose.SWIMMING, true); // face-down on the floor
         victim.addPotionEffect(new PotionEffect(PotionEffectType.DARKNESS, 60, 0, true, false));
+        blood(victim, 24); // the moment of collapse leaves a mark
         victim.getWorld().playSound(victim.getLocation(), Sound.ENTITY_PLAYER_BIG_FALL, 1f, 0.6f);
         victim.sendActionBar(line("You are down.", NamedTextColor.RED));
         if (event instanceof EntityDamageByEntityEvent byEntity
@@ -100,6 +105,7 @@ public final class DownedListener implements Listener, Runnable {
             player.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, 45, 3, true, false));
             player.addPotionEffect(new PotionEffect(PotionEffectType.MINING_FATIGUE, 45, 2, true, false));
             player.addPotionEffect(new PotionEffect(PotionEffectType.WEAKNESS, 45, 1, true, false));
+            blood(player, 6);
             player.sendActionBar(Component.text("You are down. ", NamedTextColor.RED,
                     TextDecoration.ITALIC)
                 .append(Component.text(left + "s", NamedTextColor.DARK_RED, TextDecoration.ITALIC)));
@@ -109,7 +115,18 @@ public final class DownedListener implements Listener, Runnable {
         }
     }
 
+    /** Dark red pools and falling drips around the body. */
+    private void blood(Player player, int amount) {
+        var at = player.getLocation().add(0, 0.15, 0);
+        player.getWorld().spawnParticle(Particle.DUST, at, amount, 0.45, 0.1, 0.45,
+            new Particle.DustOptions(Color.fromRGB(122, 8, 8), 1.4f));
+        player.getWorld().spawnParticle(Particle.FALLING_DUST, at.clone().add(0, 0.6, 0),
+            Math.max(1, amount / 6), 0.3, 0.2, 0.3,
+            org.bukkit.Material.REDSTONE_BLOCK.createBlockData());
+    }
+
     private void clearEffects(Player player) {
+        player.setPose(Pose.STANDING, false); // release the crawl
         player.removePotionEffect(PotionEffectType.SLOWNESS);
         player.removePotionEffect(PotionEffectType.MINING_FATIGUE);
         player.removePotionEffect(PotionEffectType.WEAKNESS);

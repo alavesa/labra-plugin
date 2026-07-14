@@ -78,6 +78,20 @@ public final class Scp427Listener implements Listener, Runnable {
             int exposure = player.getPersistentDataContainer()
                 .getOrDefault(exposureKey, PersistentDataType.INTEGER, 0) + 1;
             player.getPersistentDataContainer().set(exposureKey, PersistentDataType.INTEGER, exposure);
+            if (exposure >= TRANSFORM_AT - 30 && exposure < TRANSFORM_AT) {
+                // the last thirty seconds: the body knows before the mind -
+                // sweat pours, and then it is very sudden (no downed state:
+                // the conclusion arrives via setHealth, skipping the
+                // collapse entirely - one moment a person, the next not)
+                player.getWorld().spawnParticle(org.bukkit.Particle.SPLASH,
+                    player.getLocation().add(0, 1.4, 0), 10, 0.25, 0.35, 0.25, 0.02);
+                player.getWorld().spawnParticle(org.bukkit.Particle.FALLING_WATER,
+                    player.getLocation().add(0, 1.6, 0), 3, 0.2, 0.1, 0.2);
+                if (exposure == TRANSFORM_AT - 30) {
+                    player.sendActionBar(Component.text("You are sweating. It smells wrong.",
+                        NamedTextColor.GRAY, TextDecoration.ITALIC));
+                }
+            }
             if (exposure == WARN_AT) {
                 player.sendActionBar(Component.text("Your flesh hums.",
                     NamedTextColor.GRAY, TextDecoration.ITALIC));
