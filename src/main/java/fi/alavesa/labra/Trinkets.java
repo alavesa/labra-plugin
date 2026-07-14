@@ -8,6 +8,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
+import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -67,6 +68,18 @@ public final class Trinkets implements Listener {
         cmd.setStrings(List.of(active ? base + "_on" : base));
         meta.setCustomModelDataComponent(cmd);
         item.setItemMeta(meta);
+    }
+
+    /** A dropped trinket always closes/deactivates: SCP-427's exposure is
+     *  personal, so the next person to pick the locket up starts from their
+     *  OWN clock - an open locket lying around must never ambush them. */
+    @EventHandler
+    public void onDrop(PlayerDropItemEvent event) {
+        ItemStack dropped = event.getItemDrop().getItemStack();
+        if (baseOf(dropped) != null && isActive(dropped)) {
+            setActive(dropped, false);
+            event.getItemDrop().setItemStack(dropped);
+        }
     }
 
     @EventHandler

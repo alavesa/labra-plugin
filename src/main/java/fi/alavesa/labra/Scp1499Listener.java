@@ -38,6 +38,9 @@ public final class Scp1499Listener implements Listener, Runnable {
     private final LabRegistry registry;
     private final NamespacedKey insideKey;
     private final NamespacedKey returnKey;
+    /** Where THIS player last stood inside the dimension - the mask
+     *  remembers, so every trip after the first resumes where you left. */
+    private final NamespacedKey spotKey;
     private final Map<UUID, Integer> wornSeconds = new HashMap<>();
 
     public Scp1499Listener(LabraPlugin plugin, LabRegistry registry) {
@@ -45,6 +48,7 @@ public final class Scp1499Listener implements Listener, Runnable {
         this.registry = registry;
         this.insideKey = new NamespacedKey(plugin, "scp1499_inside");
         this.returnKey = new NamespacedKey(plugin, "scp1499_return");
+        this.spotKey = new NamespacedKey(plugin, "scp1499_spot");
     }
 
     private boolean isMask(ItemStack item) {
@@ -77,30 +81,46 @@ public final class Scp1499Listener implements Listener, Runnable {
                 NamedTextColor.GRAY, TextDecoration.ITALIC));
             return;
         }
-        Location back = player.getLocation();
-        String stored = String.format(Locale.ROOT, "%s;%f;%f;%f;%f;%f", back.getWorld().getName(),
-            back.getX(), back.getY(), back.getZ(), back.getYaw(), back.getPitch());
-        player.getPersistentDataContainer().set(returnKey, PersistentDataType.STRING, stored);
+        player.getPersistentDataContainer().set(returnKey, PersistentDataType.STRING,
+            serialize(player.getLocation()));
         player.getPersistentDataContainer().set(insideKey, PersistentDataType.BYTE, (byte) 1);
         player.addPotionEffect(new PotionEffect(PotionEffectType.DARKNESS, 40, 0, true, false));
         player.playSound(player.getLocation(), Sound.BLOCK_BEACON_DEACTIVATE, 0.7f, 0.5f);
-        player.teleport(anchor);
+        // the first trip lands at the anchor; every later one resumes at
+        // wherever this wearer last stood inside
+        Location spot = deserialize(player.getPersistentDataContainer()
+            .get(spotKey, PersistentDataType.STRING));
+        player.teleport(spot != null ? spot : anchor);
     }
 
     private void exit(Player player) {
         String stored = player.getPersistentDataContainer().get(returnKey, PersistentDataType.STRING);
+        if (isInside(player)) {
+            player.getPersistentDataContainer().set(spotKey, PersistentDataType.STRING,
+                serialize(player.getLocation()));
+        }
         player.getPersistentDataContainer().remove(insideKey);
         player.getPersistentDataContainer().remove(returnKey);
-        if (stored == null) return;
-        String[] parts = stored.split(";");
-        if (parts.length != 6) return;
-        World world = Bukkit.getWorld(parts[0]);
-        if (world == null) return;
-        Location back = new Location(world, Double.parseDouble(parts[1]), Double.parseDouble(parts[2]),
-            Double.parseDouble(parts[3]), Float.parseFloat(parts[4]), Float.parseFloat(parts[5]));
+        Location back = deserialize(stored);
+        if (back == null) return;
         player.addPotionEffect(new PotionEffect(PotionEffectType.DARKNESS, 40, 0, true, false));
         player.playSound(back, Sound.BLOCK_BEACON_ACTIVATE, 0.7f, 0.6f);
         player.teleport(back);
+    }
+
+    private String serialize(Location loc) {
+        return String.format(Locale.ROOT, "%s;%f;%f;%f;%f;%f", loc.getWorld().getName(),
+            loc.getX(), loc.getY(), loc.getZ(), loc.getYaw(), loc.getPitch());
+    }
+
+    private Location deserialize(String stored) {
+        if (stored == null) return null;
+        String[] parts = stored.split(";");
+        if (parts.length != 6) return null;
+        World world = Bukkit.getWorld(parts[0]);
+        if (world == null) return null;
+        return new Location(world, Double.parseDouble(parts[1]), Double.parseDouble(parts[2]),
+            Double.parseDouble(parts[3]), Float.parseFloat(parts[4]), Float.parseFloat(parts[5]));
     }
 
     /** Logging back in without the mask on: you don't get to stay. */

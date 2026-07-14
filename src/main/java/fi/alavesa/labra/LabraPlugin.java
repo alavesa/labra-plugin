@@ -24,6 +24,7 @@ public final class LabraPlugin extends JavaPlugin {
 
     private LabRegistry registry;
     private MachineGuiListener machineGuis;
+    private LabMenu labMenu;
 
     @Override
     public void onEnable() {
@@ -47,6 +48,13 @@ public final class LabraPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(scp038, this);
         getServer().getScheduler().runTaskTimer(this, scp038, 40L, 20L);
         getServer().getPluginManager().registerEvents(new Trinkets(), this);
+        NvgListener nvg = new NvgListener(this);
+        getServer().getScheduler().runTaskTimer(this, nvg, 40L, 20L);
+        RestraintsListener restraints = new RestraintsListener(this);
+        getServer().getPluginManager().registerEvents(restraints, this);
+        getServer().getScheduler().runTaskTimer(this, restraints, 40L, 20L);
+        labMenu = new LabMenu(this);
+        getServer().getPluginManager().registerEvents(labMenu, this);
         getServer().getScheduler().runTaskTimer(this, new HazardTask(this, registry), 40L, 20L);
         getServer().getScheduler().runTaskTimer(this, new GeigerTask(this, registry), 40L, 5L);
         getServer().getScheduler().runTaskTimer(this, scp268, 40L, 20L);
@@ -105,7 +113,8 @@ public final class LabraPlugin extends JavaPlugin {
                         // datapack functions stay the engine
                         case "kit", "rod", "pipette", "manual", "table",
                              "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "quarter",
-                             "scp268", "scp1499", "scp714", "scp018", "scp427", "scp1033" -> {
+                             "scp268", "scp1499", "scp714", "scp018", "scp427", "scp1033",
+                             "nvg", "ziptie", "handcuffs" -> {
                             if (!sender.hasPermission("lab.give")) return error(sender, "No permission.");
                             runAs(target, "lab:give/" + args[1].toLowerCase());
                             sender.sendMessage(Component.text("Gave lab " + args[1].toLowerCase()
@@ -231,6 +240,12 @@ public final class LabraPlugin extends JavaPlugin {
                     }
                     return true;
                 }
+                case "menu" -> {
+                    if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
+                    if (!(sender instanceof Player player)) return error(sender, "Players only.");
+                    labMenu.open(player, 0);
+                    return true;
+                }
                 case "reload" -> {
                     if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
                     registry.load();
@@ -254,7 +269,8 @@ public final class LabraPlugin extends JavaPlugin {
                 case "give" -> filter(Stream.of("hazmat", "geiger", "sample", "kit", "rod",
                     "pipette", "manual", "table", "element",
                     "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "quarter",
-                    "scp268", "scp1499", "scp714", "scp018", "scp427", "scp1033"), args[1]);
+                    "scp268", "scp1499", "scp714", "scp018", "scp427", "scp1033",
+                    "nvg", "ziptie", "handcuffs"), args[1]);
                 case "zone" -> filter(Stream.of("add", "remove", "list", "alarm"), args[1]);
                 case "scp1499" -> filter(Stream.of("sethere", "info"), args[1]);
                 case "place" -> filter(MACHINES.stream(), args[1]);
@@ -280,7 +296,8 @@ public final class LabraPlugin extends JavaPlugin {
     private static final List<String> DATAPACK_ITEMS =
         List.of("kit", "rod", "pipette", "manual", "table", "element",
             "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "quarter",
-            "scp268", "scp1499", "scp714", "scp018", "scp427", "scp1033");
+            "scp268", "scp1499", "scp714", "scp018", "scp427", "scp1033",
+            "nvg", "ziptie", "handcuffs");
 
     /** The lab-datapack's load function writes its version to #datapack in
      *  lab.var. No marker (or an old one) means dispatched functions would

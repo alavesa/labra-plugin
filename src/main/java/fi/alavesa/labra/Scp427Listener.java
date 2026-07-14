@@ -77,13 +77,30 @@ public final class Scp427Listener implements Listener, Runnable {
         Location at = player.getLocation();
         player.damage(10000.0);
         if (!player.isDead() && player.getHealth() > 0) return; // a totem only buys a second
-        at.getWorld().spawn(at, Ravager.class, beast -> {
-            beast.customName(Component.text("SCP-427-1", NamedTextColor.DARK_RED));
-            beast.setCustomNameVisible(false);
-            beast.setPersistent(true);
-            beast.setRemoveWhenFarAway(false);
-            beast.addScoreboardTag("scp427.beast");
+        at.setPitch(0); // displays inherit pitch - never let the flesh tilt
+        Ravager beast = at.getWorld().spawn(at, Ravager.class, b -> {
+            b.customName(Component.text("SCP-427-1", NamedTextColor.DARK_RED));
+            b.setCustomNameVisible(false);
+            b.setPersistent(true);
+            b.setRemoveWhenFarAway(false);
+            b.setInvisible(true); // the ravager is the engine, the display is the flesh
+            b.addScoreboardTag("scp427.beast");
         });
+        org.bukkit.entity.ItemDisplay skin = at.getWorld().spawn(at,
+            org.bukkit.entity.ItemDisplay.class, d -> {
+                d.setPersistent(true);
+                org.bukkit.inventory.ItemStack item =
+                    new org.bukkit.inventory.ItemStack(org.bukkit.Material.PAPER);
+                var meta = item.getItemMeta();
+                meta.setItemModel(new NamespacedKey("lab", "scp427_1"));
+                item.setItemMeta(meta);
+                d.setItemStack(item);
+                d.setTransformation(new org.bukkit.util.Transformation(
+                    new org.joml.Vector3f(0, 1.1f, 0), new org.joml.Quaternionf(),
+                    new org.joml.Vector3f(2.4f, 2.4f, 2.4f), new org.joml.Quaternionf()));
+                d.addScoreboardTag("scp427.beast");
+            });
+        beast.addPassenger(skin);
         at.getWorld().playSound(at, Sound.ENTITY_RAVAGER_ROAR, 1.2f, 0.7f);
     }
 }

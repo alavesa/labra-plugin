@@ -78,13 +78,19 @@ public final class Scp1033Listener implements Listener, Runnable {
             0.25, 0.4, 0.25, new Particle.DustOptions(org.bukkit.Color.fromRGB(140, 10, 10), 1.0f));
     }
 
-    /** Once a second: the bracelet collects. */
+    /** Once a second: the probes strengthen the carrier - and the bracelet
+     *  collects what it is owed. */
     @Override
     public void run() {
         for (Player player : plugin.getServer().getOnlinePlayers()) {
+            if (!Trinkets.hasActive(player, "scp1033")) continue;
+            // twelve probes, working: the carrier is more than themselves
+            player.addPotionEffect(new org.bukkit.potion.PotionEffect(
+                org.bukkit.potion.PotionEffectType.STRENGTH, 45, 1, true, false));
+            player.addPotionEffect(new org.bukkit.potion.PotionEffect(
+                org.bukkit.potion.PotionEffectType.REGENERATION, 45, 1, true, false));
             Double owed = debt.get(player.getUniqueId());
             if (owed == null || owed <= 0) continue;
-            if (!Trinkets.hasActive(player, "scp1033")) continue; // paused, not forgiven
             double payment = Math.min(DRAIN_PER_SECOND, owed);
             debt.put(player.getUniqueId(), owed - payment);
             player.getWorld().spawnParticle(Particle.DUST, player.getLocation().add(0, 1.2, 0), 4,
