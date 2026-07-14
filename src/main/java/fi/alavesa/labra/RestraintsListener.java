@@ -3,7 +3,6 @@ package fi.alavesa.labra;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
-import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Sound;
 import org.bukkit.entity.Entity;
@@ -11,10 +10,13 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.persistence.PersistentDataType;
@@ -27,23 +29,31 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Zipties and handcuffs. Detaining is EARNED: hold right-click for the full
- * two seconds (the items charge like food - that IS the hold timer) while
- * standing BEHIND the target's back; a face-to-face attempt fails. Detained
- * hands are useless: no attacking, no item use, no dropping - only walking,
- * slowly. A ziptie is spent on use and can be STRUGGLED out of (keep sneak
- * held ~20s); handcuffs are reusable, come back to whoever releases the
- * prisoner, and do not break. Release: right-click the prisoner with an
- * empty hand.
+ * Zipties and handcuffs - two different tools for two different jobs,
+ * modeled on the old server's cuffs.sk and the same 2-second hold-from-
+ * behind capture as before.
+ *
+ * ZIPTIES - crowd control. Single use each, tie as many people as you have
+ * ties. The bound can still WALK (slowly) but their hands and pockets are
+ * useless: no attacking, no item use, no inventory access. A determined
+ * prisoner struggles out (hold sneak ~20s).
+ *
+ * HANDCUFFS - prisoner transport. Reusable, never consumed, ONE prisoner
+ * per captor. The cuffed cannot move AT ALL on their own - they are stuck
+ * to their captor: sneak (or walk far enough) and the prisoner is pulled to
+ * your position, exactly like the old script. Only being released frees
+ * them; there is no struggling out of steel.
  */
 public final class RestraintsListener implements Listener, Runnable {
 
-    private static final double BEHIND_DOT = -0.35; // captor must be in the back half-space
+    private static final double BEHIND_DOT = -0.35;
     private static final int STRUGGLE_SECONDS = 20;
 
     private final LabraPlugin plugin;
-    private final NamespacedKey restrainedKey; // "ziptie" | "handcuffs" on the victim
+    private final NamespacedKey restrainedKey;            // "ziptie" | "handcuffs" on the victim
     private final Map<UUID, Integer> struggling = new HashMap<>();
+    private final Map<UUID, UUID> prisonerOf = new HashMap<>(); // captor -> cuffed victim
+    private final Map<UUID, UUID> captorOf = new HashMap<>();   // victim -> captor
 
     public RestraintsListener(LabraPlugin plugin) {
         this.plugin = plugin;
@@ -62,6 +72,10 @@ public final class RestraintsListener implements Listener, Runnable {
         return player.getPersistentDataContainer().has(restrainedKey, PersistentDataType.STRING);
     }
 
+    private String restraintOf(Player player) {
+        return player.getPersistentDataContainer().get(restrainedKey, PersistentDataType.STRING);
+    }
+
     // ------------------------------------------------------------ detaining
 
     /** The 2-second right-click hold completes as a "consume" - intercept it. */
@@ -71,6 +85,10 @@ public final class RestraintsListener implements Listener, Runnable {
         if (type == null) return;
         event.setCancelled(true); // never actually eaten
         Player captor = event.getPlayer();
+        if (type.equals("handcuffs") && prisonerOf.containsKey(captor.getUniqueId())) {
+            captor.sendActionBar(line("You already have a prisoner.", NamedTextColor.GRAY));
+            return;
+        }
         Entity target = captor.getTargetEntity(3);
         if (!(target instanceof Player victim) || isRestrained(victim)) {
             captor.sendActionBar(line("No one within reach.", NamedTextColor.GRAY));
@@ -87,36 +105,59 @@ public final class RestraintsListener implements Listener, Runnable {
         if (type.equals("ziptie")) {
             ItemStack hand = captor.getInventory().getItemInMainHand();
             if (restraintType(hand) != null) hand.setAmount(hand.getAmount() - 1);
+        } else {
+            prisonerOf.put(captor.getUniqueId(), victim.getUniqueId());
+            captorOf.put(victim.getUniqueId(), captor.getUniqueId());
         }
         victim.getWorld().playSound(victim.getLocation(), Sound.BLOCK_TRIPWIRE_CLICK_ON, 1f, 0.7f);
-        victim.sendActionBar(line("Your hands are bound.", NamedTextColor.RED));
+        victim.sendActionBar(line(type.equals("ziptie")
+            ? "Your hands are tied." : "You have been cuffed.", NamedTextColor.RED));
         captor.sendActionBar(line("Detained.", NamedTextColor.GRAY));
     }
 
     // ------------------------------------------------------------- captivity
 
-    /** Once a second: keep the bound slow, and let ziptied prisoners struggle. */
+    /** Once a second: hold the bound, drag the cuffed, let ties be fought. */
     @Override
     public void run() {
         for (Player player : plugin.getServer().getOnlinePlayers()) {
-            String type = player.getPersistentDataContainer().get(restrainedKey, PersistentDataType.STRING);
+            String type = restraintOf(player);
             if (type == null) continue;
-            player.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, 45, 2, true, false));
-            player.addPotionEffect(new PotionEffect(PotionEffectType.MINING_FATIGUE, 45, 2, true, false));
-            player.addPotionEffect(new PotionEffect(PotionEffectType.WEAKNESS, 45, 1, true, false));
-            if (type.equals("ziptie") && player.isSneaking()) {
-                int seconds = struggling.merge(player.getUniqueId(), 1, Integer::sum);
-                if (seconds % 5 == 0 && seconds < STRUGGLE_SECONDS) {
-                    player.sendActionBar(line("The tie digs in...", NamedTextColor.GRAY));
-                }
-                if (seconds >= STRUGGLE_SECONDS) {
-                    free(player);
-                    player.sendActionBar(line("The tie snaps.", NamedTextColor.GRAY));
-                    player.getWorld().playSound(player.getLocation(),
-                        Sound.ENTITY_LEASH_KNOT_BREAK, 1f, 1.4f);
+            if (type.equals("handcuffs")) {
+                // the cuffs.sk freeze: slowness off the scale + a jump boost
+                // so high the jump never happens - the prisoner goes NOWHERE
+                player.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, 45, 254, true, false));
+                player.addPotionEffect(new PotionEffect(PotionEffectType.JUMP_BOOST, 45, 127, true, false));
+                UUID captorId = captorOf.get(player.getUniqueId());
+                Player captor = captorId == null ? null : plugin.getServer().getPlayer(captorId);
+                if (captor != null && captor.getWorld().equals(player.getWorld())
+                    && (captor.isSneaking()
+                        || captor.getLocation().distance(player.getLocation()) > 2.0)) {
+                    // pulled along: the prisoner arrives at the captor's spot,
+                    // keeping their own view direction (straight from cuffs.sk)
+                    var to = captor.getLocation().clone();
+                    to.setYaw(player.getLocation().getYaw());
+                    to.setPitch(player.getLocation().getPitch());
+                    player.teleport(to);
                 }
             } else {
-                struggling.remove(player.getUniqueId());
+                // zipties: slow but mobile - the hands are the problem
+                player.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, 45, 2, true, false));
+                player.addPotionEffect(new PotionEffect(PotionEffectType.WEAKNESS, 45, 1, true, false));
+                if (player.isSneaking()) {
+                    int seconds = struggling.merge(player.getUniqueId(), 1, Integer::sum);
+                    if (seconds % 5 == 0 && seconds < STRUGGLE_SECONDS) {
+                        player.sendActionBar(line("The tie digs in...", NamedTextColor.GRAY));
+                    }
+                    if (seconds >= STRUGGLE_SECONDS) {
+                        free(player);
+                        player.sendActionBar(line("The tie snaps.", NamedTextColor.GRAY));
+                        player.getWorld().playSound(player.getLocation(),
+                            Sound.ENTITY_LEASH_KNOT_BREAK, 1f, 1.4f);
+                    }
+                } else {
+                    struggling.remove(player.getUniqueId());
+                }
             }
         }
     }
@@ -124,25 +165,27 @@ public final class RestraintsListener implements Listener, Runnable {
     private void free(Player player) {
         player.getPersistentDataContainer().remove(restrainedKey);
         struggling.remove(player.getUniqueId());
+        UUID captorId = captorOf.remove(player.getUniqueId());
+        if (captorId != null) prisonerOf.remove(captorId);
         player.removePotionEffect(PotionEffectType.SLOWNESS);
-        player.removePotionEffect(PotionEffectType.MINING_FATIGUE);
+        player.removePotionEffect(PotionEffectType.JUMP_BOOST);
         player.removePotionEffect(PotionEffectType.WEAKNESS);
     }
 
-    /** Release: an EMPTY main hand on the prisoner. Handcuffs come back. */
+    /** Release: right-click the prisoner (empty hand or the restraint). */
     @EventHandler
     public void onRelease(PlayerInteractEntityEvent event) {
         if (event.getHand() != EquipmentSlot.HAND) return;
         if (!(event.getRightClicked() instanceof Player victim) || !isRestrained(victim)) return;
         Player releaser = event.getPlayer();
-        if (releaser.getInventory().getItemInMainHand().getType() != Material.AIR) return;
+        ItemStack hand = releaser.getInventory().getItemInMainHand();
+        boolean emptyHand = hand.getType().isAir();
+        boolean holdsRestraint = restraintType(hand) != null;
+        if (!emptyHand && !holdsRestraint) return;
+        // holding a restraint on a FREE target starts a capture, not a
+        // release - only clicks on the restrained land here anyway
         event.setCancelled(true);
-        String type = victim.getPersistentDataContainer().get(restrainedKey, PersistentDataType.STRING);
         free(victim);
-        if ("handcuffs".equals(type)) {
-            plugin.getServer().dispatchCommand(plugin.getServer().getConsoleSender(),
-                "execute as " + releaser.getUniqueId() + " at @s run function lab:give/handcuffs");
-        }
         victim.getWorld().playSound(victim.getLocation(), Sound.BLOCK_TRIPWIRE_CLICK_OFF, 1f, 1.1f);
         victim.sendActionBar(line("Your hands are free.", NamedTextColor.GRAY));
         releaser.sendActionBar(line("Released.", NamedTextColor.GRAY));
@@ -169,6 +212,31 @@ public final class RestraintsListener implements Listener, Runnable {
     @EventHandler(ignoreCancelled = true)
     public void onDrop(PlayerDropItemEvent event) {
         if (isRestrained(event.getPlayer())) event.setCancelled(true);
+    }
+
+    /** Bound hands can't dig through pockets either: no inventory access. */
+    @EventHandler(ignoreCancelled = true)
+    public void onInventoryOpen(InventoryOpenEvent event) {
+        if (event.getPlayer() instanceof Player player && isRestrained(player)) {
+            event.setCancelled(true);
+            player.sendActionBar(line("Your hands are bound.", NamedTextColor.GRAY));
+        }
+    }
+
+    @EventHandler(ignoreCancelled = true)
+    public void onInventoryClick(InventoryClickEvent event) {
+        if (event.getWhoClicked() instanceof Player player && isRestrained(player)) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler
+    public void onQuit(PlayerQuitEvent event) {
+        // a quitting captor leaves the prisoner cuffed where they stand;
+        // a quitting prisoner keeps the restraint (PDC survives the relog)
+        UUID victimId = prisonerOf.remove(event.getPlayer().getUniqueId());
+        if (victimId != null) captorOf.remove(victimId);
+        struggling.remove(event.getPlayer().getUniqueId());
     }
 
     private Component line(String text, NamedTextColor color) {

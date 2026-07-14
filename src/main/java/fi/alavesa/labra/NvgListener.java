@@ -80,19 +80,16 @@ public final class NvgListener implements Listener, Runnable {
                         300, 0, true, false));
                     int segments = (int) Math.ceil(left * 10.0 / FULL_CHARGE_SECONDS);
                     Integer previous = lastSegments.put(player.getUniqueId(), segments);
-                    boolean lowPulse = left <= LOW_WARN_SECONDS && left % 10 == 0;
-                    if (previous == null || previous != segments || lowPulse) {
-                        player.sendActionBar(batteryBar(segments));
-                        if (lowPulse || (previous != null && segments <= 2 && previous != segments)) {
-                            player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_BIT, 0.6f, 0.6f);
-                        }
+                    player.sendActionBar(batteryBar(segments)); // always on display
+                    if (previous != null && segments <= 2 && previous != segments) {
+                        player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_BIT, 0.6f, 0.6f);
                     }
                 } else {
                     if (wasSeeing.remove(player.getUniqueId())) {
-                        player.removePotionEffect(PotionEffectType.NIGHT_VISION);
-                        player.sendActionBar(line("The goggles die."));
                         player.playSound(player.getLocation(), Sound.BLOCK_LEVER_CLICK, 0.7f, 0.5f);
                     }
+                    player.removePotionEffect(PotionEffectType.NIGHT_VISION);
+                    player.sendActionBar(batteryBar(0)); // an empty dead frame, always
                 }
             } else {
                 lastSegments.remove(player.getUniqueId());

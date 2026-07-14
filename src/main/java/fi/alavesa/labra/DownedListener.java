@@ -4,8 +4,13 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Color;
+import org.bukkit.Location;
+import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
+import org.bukkit.attribute.Attribute;
+import org.bukkit.attribute.AttributeModifier;
 import org.bukkit.entity.Pose;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
@@ -40,14 +45,17 @@ import java.util.UUID;
  */
 public final class DownedListener implements Listener, Runnable {
 
-    private static final long BLEED_OUT_MS = 60_000L;
+    private static final long RECOVERY_MS = 60_000L;
     private static final double ANOMALY_THRESHOLD = 100.0; // damage this big is fate
 
     private final LabraPlugin plugin;
-    private final Map<UUID, Long> downed = new HashMap<>(); // player -> deadline
+    private final NamespacedKey healthCapKey;
+    private final Map<UUID, Long> downed = new HashMap<>(); // player -> recovery time
+    private final Map<UUID, Location> crawlCeiling = new HashMap<>(); // faked block per player
 
     public DownedListener(LabraPlugin plugin) {
         this.plugin = plugin;
+        this.healthCapKey = new NamespacedKey(plugin, "downed_cap");
     }
 
     public boolean isDowned(Player player) {
@@ -75,8 +83,14 @@ public final class DownedListener implements Listener, Runnable {
             return;
         }
         event.setCancelled(true);
+        var maxHealth = victim.getAttribute(Attribute.MAX_HEALTH);
+        if (maxHealth != null && maxHealth.getModifier(healthCapKey) == null) {
+            // three hearts is all a downed body gets to work with
+            maxHealth.addTransientModifier(new AttributeModifier(healthCapKey,
+                6.0 - maxHealth.getBaseValue(), AttributeModifier.Operation.ADD_NUMBER));
+        }
         victim.setHealth(1.0);
-        downed.put(victim.getUniqueId(), System.currentTimeMillis() + BLEED_OUT_MS);
+        downed.put(victim.getUniqueId(), System.currentTimeMillis() + RECOVERY_MS);
         victim.setPose(Pose.SWIMMING, true); // face-down on the floor
         victim.addPotionEffect(new PotionEffect(PotionEffectType.DARKNESS, 60, 0, true, false));
         blood(victim, 24); // the moment of collapse leaves a mark
@@ -97,9 +111,15 @@ public final class DownedListener implements Listener, Runnable {
             if (deadline == null) continue;
             long left = (deadline - now) / 1000;
             if (left <= 0) {
+                // you stayed away from whatever did this for a full minute -
+                // the reward is getting up on your own, shaken but alive
                 downed.remove(player.getUniqueId());
                 clearEffects(player);
-                player.setHealth(0.0); // bled out - a real death, drops and all
+                player.setHealth(Math.min(4.0, player.getAttribute(Attribute.MAX_HEALTH).getValue()));
+                player.addPotionEffect(new PotionEffect(PotionEffectType.WEAKNESS, 300, 0, true, false));
+                player.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, 200, 0, true, false));
+                player.sendActionBar(line("You pull yourself together.", NamedTextColor.GRAY));
+                player.getWorld().playSound(player.getLocation(), Sound.ENTITY_PLAYER_BREATH, 0.8f, 0.8f);
                 continue;
             }
             player.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, 45, 3, true, false));
@@ -108,7 +128,7 @@ public final class DownedListener implements Listener, Runnable {
             blood(player, 6);
             player.sendActionBar(Component.text("You are down. ", NamedTextColor.RED,
                     TextDecoration.ITALIC)
-                .append(Component.text(left + "s", NamedTextColor.DARK_RED, TextDecoration.ITALIC)));
+                .append(Component.text("Hold on. " + left + "s", NamedTextColor.DARK_RED, TextDecoration.ITALIC)));
             if (left % 2 == 0) {
                 player.playSound(player.getLocation(), Sound.ENTITY_WARDEN_HEARTBEAT, 0.5f, 0.9f);
             }
@@ -125,7 +145,48 @@ public final class DownedListener implements Listener, Runnable {
             org.bukkit.Material.REDSTONE_BLOCK.createBlockData());
     }
 
+    /**
+     * Runs every 3 ticks (registered separately): a CLIENT-SIDE barrier is
+     * faked into the block above each downed player's head, so their own
+     * client physically forces the crawl - setPose alone only convinces the
+     * spectators. The fake block follows them and is un-faked on exit.
+     */
+    public void crawlTick() {
+        for (Player player : plugin.getServer().getOnlinePlayers()) {
+            boolean down = downed.containsKey(player.getUniqueId());
+            Location current = crawlCeiling.get(player.getUniqueId());
+            if (!down) {
+                if (current != null) {
+                    player.sendBlockChange(current, current.getBlock().getBlockData());
+                    crawlCeiling.remove(player.getUniqueId());
+                }
+                continue;
+            }
+            Location above = player.getLocation().getBlock().getLocation().add(0, 1, 0);
+            if (current != null && current.getBlockX() == above.getBlockX()
+                && current.getBlockY() == above.getBlockY()
+                && current.getBlockZ() == above.getBlockZ()) {
+                continue; // already faked here
+            }
+            if (current != null) {
+                player.sendBlockChange(current, current.getBlock().getBlockData());
+            }
+            if (above.getBlock().getType() == Material.AIR) {
+                player.sendBlockChange(above, Material.BARRIER.createBlockData());
+                crawlCeiling.put(player.getUniqueId(), above);
+            } else {
+                crawlCeiling.remove(player.getUniqueId()); // a real ceiling does the job
+            }
+        }
+    }
+
     private void clearEffects(Player player) {
+        var maxHealth = player.getAttribute(Attribute.MAX_HEALTH);
+        if (maxHealth != null && maxHealth.getModifier(healthCapKey) != null) {
+            maxHealth.removeModifier(healthCapKey);
+        }
+        Location faked = crawlCeiling.remove(player.getUniqueId());
+        if (faked != null) player.sendBlockChange(faked, faked.getBlock().getBlockData());
         player.setPose(Pose.STANDING, false); // release the crawl
         player.removePotionEffect(PotionEffectType.SLOWNESS);
         player.removePotionEffect(PotionEffectType.MINING_FATIGUE);
@@ -155,7 +216,7 @@ public final class DownedListener implements Listener, Runnable {
             return;
         }
         downed.remove(patient.getUniqueId());
-        clearEffects(patient);
+        clearEffects(patient); // lifts the 3-heart cap before healing past it
         patient.setHealth(12.0);
         patient.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, 200, 0, true, false));
         spend(medic);
@@ -196,12 +257,13 @@ public final class DownedListener implements Listener, Runnable {
         if (isDowned(event.getPlayer())) event.setCancelled(true);
     }
 
-    /** Logging out while down is choosing the clock. */
+    /** Logging out while down: you come back exactly as down as you left. */
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
-        if (downed.remove(event.getPlayer().getUniqueId()) != null) {
-            clearEffects(event.getPlayer());
-            event.getPlayer().setHealth(0.0);
+        Long deadline = downed.get(event.getPlayer().getUniqueId());
+        if (deadline != null) {
+            // pause the clock generously: rejoining restarts the full minute
+            downed.put(event.getPlayer().getUniqueId(), System.currentTimeMillis() + RECOVERY_MS);
         }
     }
 
