@@ -20,7 +20,7 @@ public final class LabraPlugin extends JavaPlugin {
      *  load function writes). Commands that dispatch into the datapack check
      *  this first, so a missing/stale datapack fails LOUDLY instead of
      *  dispatching functions that silently don't exist. */
-    private static final int DATAPACK_VERSION = 20;
+    private static final int DATAPACK_VERSION = 23;
 
     private LabRegistry registry;
     private MachineGuiListener machineGuis;
@@ -65,7 +65,7 @@ public final class LabraPlugin extends JavaPlugin {
         getLogger().info("Labra enabled - zones: " + registry.zones().keySet());
         getServer().getScheduler().runTaskLater(this, () -> {
             if (datapackVersion() < DATAPACK_VERSION) {
-                getLogger().warning("lab-datapack v0.20+ NOT detected in this world - /lab give/place");
+                getLogger().warning("lab-datapack v0.23+ NOT detected in this world - /lab give/place");
                 getLogger().warning("will refuse to run. Install Lab.zip from");
                 getLogger().warning("github.com/alavesa/lab-datapack/releases into world/datapacks/.");
             }

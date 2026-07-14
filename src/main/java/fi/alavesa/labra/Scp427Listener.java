@@ -11,6 +11,7 @@ import org.bukkit.Sound;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Ravager;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.potion.PotionEffect;
@@ -32,6 +33,8 @@ public final class Scp427Listener implements Listener, Runnable {
 
     private final LabraPlugin plugin;
     private final NamespacedKey exposureKey;
+    /** Who was already active last tick - re-activation is what clamps. */
+    private final java.util.Set<java.util.UUID> recentlyActive = new java.util.HashSet<>();
 
     public Scp427Listener(LabraPlugin plugin) {
         this.plugin = plugin;
@@ -47,7 +50,27 @@ public final class Scp427Listener implements Listener, Runnable {
     @Override
     public void run() {
         for (Player player : plugin.getServer().getOnlinePlayers()) {
-            if (!Trinkets.hasActive(player, "scp427")) continue;
+            if (!Trinkets.hasActive(player, "scp427")) {
+                // the flesh forgets, slowly: old exposure fades while the
+                // locket is closed, so nobody gets executed for last week
+                int old = player.getPersistentDataContainer()
+                    .getOrDefault(exposureKey, PersistentDataType.INTEGER, 0);
+                recentlyActive.remove(player.getUniqueId());
+                if (old > 0) {
+                    player.getPersistentDataContainer().set(exposureKey,
+                        PersistentDataType.INTEGER, old - 1);
+                }
+                continue;
+            }
+            // always at least a warning's worth of time after re-opening:
+            // exposure re-enters clamped 10s below the transformation line
+            int clamped = player.getPersistentDataContainer()
+                .getOrDefault(exposureKey, PersistentDataType.INTEGER, 0);
+            if (clamped > TRANSFORM_AT - 10 && !recentlyActive.contains(player.getUniqueId())) {
+                player.getPersistentDataContainer().set(exposureKey,
+                    PersistentDataType.INTEGER, TRANSFORM_AT - 10);
+            }
+            recentlyActive.add(player.getUniqueId());
             player.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, 45, 1, true, false));
             rewind(player, "lab.inf");
             rewind(player, "lab.cola");
@@ -63,6 +86,15 @@ public final class Scp427Listener implements Listener, Runnable {
         }
     }
 
+    /** Death wipes the ledger: exposure belongs to the flesh, and this is
+     *  new flesh. Without this, dying to the locket meant every later
+     *  pickup executed you on the spot. */
+    @org.bukkit.event.EventHandler
+    public void onDeath(PlayerDeathEvent event) {
+        event.getPlayer().getPersistentDataContainer().remove(exposureKey);
+        recentlyActive.remove(event.getPlayer().getUniqueId());
+    }
+
     /** Wind a datapack affliction backwards by 2 (null-guarded, floor 0). */
     private void rewind(Player player, String objectiveName) {
         Objective objective = Bukkit.getScoreboardManager().getMainScoreboard().getObjective(objectiveName);
@@ -75,8 +107,9 @@ public final class Scp427Listener implements Listener, Runnable {
     /** The ledger comes due. */
     private void transform(Player player) {
         Location at = player.getLocation();
-        player.damage(10000.0);
-        if (!player.isDead() && player.getHealth() > 0) return; // a totem only buys a second
+        // setHealth, not damage: no armor, no totem, no SCP-1033-RU bracelet
+        // arguing - the transformation is not an attack, it is a conclusion
+        player.setHealth(0.0);
         at.setPitch(0); // displays inherit pitch - never let the flesh tilt
         Ravager beast = at.getWorld().spawn(at, Ravager.class, b -> {
             b.customName(Component.text("SCP-427-1", NamedTextColor.DARK_RED));

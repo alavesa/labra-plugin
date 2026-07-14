@@ -8,6 +8,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
+import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.ItemStack;
@@ -79,6 +80,15 @@ public final class Trinkets implements Listener {
         if (baseOf(dropped) != null && isActive(dropped)) {
             setActive(dropped, false);
             event.getItemDrop().setItemStack(dropped);
+        }
+    }
+
+    /** Death drops skip PlayerDropItemEvent - close those too, or the
+     *  victim's own open locket ambushes whoever loots the body. */
+    @EventHandler
+    public void onDeath(PlayerDeathEvent event) {
+        for (ItemStack dropped : event.getDrops()) {
+            if (baseOf(dropped) != null && isActive(dropped)) setActive(dropped, false);
         }
     }
 

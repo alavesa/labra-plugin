@@ -89,10 +89,10 @@ public final class Scp018Listener implements Listener {
         double speed = velocity.length();
         at.getWorld().playSound(at, Sound.BLOCK_NOTE_BLOCK_HAT,
             (float) Math.min(1.0, 0.3 + speed * 0.3), 1.8f);
-        for (Entity near : at.getWorld().getNearbyEntities(at, 0.8, 0.8, 0.8)) {
+        for (Entity near : at.getWorld().getNearbyEntities(at, 1.2, 1.2, 1.2)) {
             if (near instanceof LivingEntity living) {
-                if (shooter instanceof LivingEntity source) living.damage(speed * 2, source);
-                else living.damage(speed * 2);
+                if (shooter instanceof LivingEntity source) living.damage(speed * 5, source);
+                else living.damage(speed * 5);
             }
         }
 
@@ -108,6 +108,28 @@ public final class Scp018Listener implements Listener {
         }
         reflected.multiply(1.15);
         if (reflected.lengthSquared() < 1.0e-6) return; // dead stop - the ball rests
+
+        var rng = java.util.concurrent.ThreadLocalRandom.current();
+        double speed018 = reflected.length();
+        if (rng.nextDouble() < 0.30) {
+            // seek: a third of the bounces turn toward the nearest player
+            org.bukkit.entity.Player mark = null;
+            double best = 10 * 10;
+            for (org.bukkit.entity.Player p : at.getWorld().getPlayers()) {
+                double d = p.getLocation().distanceSquared(at);
+                if (d < best) { best = d; mark = p; }
+            }
+            if (mark != null) {
+                reflected = mark.getEyeLocation().toVector().subtract(at.toVector())
+                    .normalize().multiply(speed018);
+            }
+        } else {
+            // scatter: never twice off the same wall the same way
+            reflected.add(new Vector(rng.nextDouble(-0.35, 0.35),
+                rng.nextDouble(-0.2, 0.35), rng.nextDouble(-0.35, 0.35))
+                .multiply(speed018 * 0.6));
+            reflected = reflected.normalize().multiply(speed018);
+        }
         if (reflected.length() > MAX_SPEED) reflected = reflected.normalize().multiply(MAX_SPEED);
 
         Location from = normal != null
