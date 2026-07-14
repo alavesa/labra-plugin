@@ -20,7 +20,7 @@ public final class LabraPlugin extends JavaPlugin {
      *  load function writes). Commands that dispatch into the datapack check
      *  this first, so a missing/stale datapack fails LOUDLY instead of
      *  dispatching functions that silently don't exist. */
-    private static final int DATAPACK_VERSION = 23;
+    private static final int DATAPACK_VERSION = 24;
 
     private LabRegistry registry;
     private MachineGuiListener machineGuis;
@@ -49,6 +49,7 @@ public final class LabraPlugin extends JavaPlugin {
         getServer().getScheduler().runTaskTimer(this, scp038, 40L, 20L);
         getServer().getPluginManager().registerEvents(new Trinkets(), this);
         NvgListener nvg = new NvgListener(this);
+        getServer().getPluginManager().registerEvents(nvg, this);
         getServer().getScheduler().runTaskTimer(this, nvg, 40L, 20L);
         RestraintsListener restraints = new RestraintsListener(this);
         getServer().getPluginManager().registerEvents(restraints, this);
@@ -65,7 +66,7 @@ public final class LabraPlugin extends JavaPlugin {
         getLogger().info("Labra enabled - zones: " + registry.zones().keySet());
         getServer().getScheduler().runTaskLater(this, () -> {
             if (datapackVersion() < DATAPACK_VERSION) {
-                getLogger().warning("lab-datapack v0.23+ NOT detected in this world - /lab give/place");
+                getLogger().warning("lab-datapack v0.24+ NOT detected in this world - /lab give/place");
                 getLogger().warning("will refuse to run. Install Lab.zip from");
                 getLogger().warning("github.com/alavesa/lab-datapack/releases into world/datapacks/.");
             }
@@ -114,7 +115,7 @@ public final class LabraPlugin extends JavaPlugin {
                         case "kit", "rod", "pipette", "manual", "table",
                              "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "quarter",
                              "scp268", "scp1499", "scp714", "scp018", "scp427", "scp1033",
-                             "nvg", "ziptie", "handcuffs" -> {
+                             "nvg", "ziptie", "handcuffs", "battery" -> {
                             if (!sender.hasPermission("lab.give")) return error(sender, "No permission.");
                             runAs(target, "lab:give/" + args[1].toLowerCase());
                             sender.sendMessage(Component.text("Gave lab " + args[1].toLowerCase()
@@ -270,7 +271,7 @@ public final class LabraPlugin extends JavaPlugin {
                     "pipette", "manual", "table", "element",
                     "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "quarter",
                     "scp268", "scp1499", "scp714", "scp018", "scp427", "scp1033",
-                    "nvg", "ziptie", "handcuffs"), args[1]);
+                    "nvg", "ziptie", "handcuffs", "battery"), args[1]);
                 case "zone" -> filter(Stream.of("add", "remove", "list", "alarm"), args[1]);
                 case "scp1499" -> filter(Stream.of("sethere", "info"), args[1]);
                 case "place" -> filter(MACHINES.stream(), args[1]);
@@ -297,7 +298,7 @@ public final class LabraPlugin extends JavaPlugin {
         List.of("kit", "rod", "pipette", "manual", "table", "element",
             "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "quarter",
             "scp268", "scp1499", "scp714", "scp018", "scp427", "scp1033",
-            "nvg", "ziptie", "handcuffs");
+            "nvg", "ziptie", "handcuffs", "battery");
 
     /** The lab-datapack's load function writes its version to #datapack in
      *  lab.var. No marker (or an old one) means dispatched functions would

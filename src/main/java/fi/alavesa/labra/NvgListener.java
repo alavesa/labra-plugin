@@ -1,8 +1,18 @@
 package fi.alavesa.labra;
 
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
+import org.bukkit.Sound;
 import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.block.Action;
+import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 
@@ -11,19 +21,25 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Night vision goggles. Carved-pumpkin based ON PURPOSE: the client renders
- * its fullscreen pumpkinblur overlay for any carved pumpkin on the head, and
- * the resource pack repaints that overlay as a green phosphor goggle view -
- * the world through a creeper's eyes. The plugin's only job is the Night
- * Vision effect while they're worn.
+ * Night vision goggles - with a battery. A fresh pair runs 30 minutes of
+ * wear; a dead pair still straps to your face (the green overlay is the
+ * client's pumpkin view, charge or no charge) but amplifies nothing, which
+ * is exactly as useless as it sounds. A 9V battery in hand, right-clicked,
+ * swaps a fresh cell into the goggles on your head - or the first pair in
+ * your pack - and is spent doing it.
  */
-public final class NvgListener implements Runnable {
+public final class NvgListener implements Listener, Runnable {
+
+    private static final int FULL_CHARGE_SECONDS = 30 * 60;
+    private static final int LOW_WARN_SECONDS = 60;
 
     private final LabraPlugin plugin;
-    private final Set<UUID> wasWearing = new HashSet<>();
+    private final NamespacedKey chargeKey;
+    private final Set<UUID> wasSeeing = new HashSet<>();
 
     public NvgListener(LabraPlugin plugin) {
         this.plugin = plugin;
+        this.chargeKey = new NamespacedKey(plugin, "nvg_charge");
     }
 
     private boolean isGoggles(ItemStack item) {
@@ -31,17 +47,86 @@ public final class NvgListener implements Runnable {
         return item.getItemMeta().getCustomModelDataComponent().getStrings().contains("lab_nvg");
     }
 
+    private boolean isBattery(ItemStack item) {
+        if (item == null || !item.hasItemMeta()) return false;
+        return item.getItemMeta().getCustomModelDataComponent().getStrings().contains("lab_battery");
+    }
+
+    private int charge(ItemStack goggles) {
+        Integer stored = goggles.getItemMeta().getPersistentDataContainer()
+            .get(chargeKey, PersistentDataType.INTEGER);
+        return stored == null ? FULL_CHARGE_SECONDS : stored; // fresh pair = full cell
+    }
+
+    private void setCharge(ItemStack goggles, int seconds) {
+        var meta = goggles.getItemMeta();
+        meta.getPersistentDataContainer().set(chargeKey, PersistentDataType.INTEGER,
+            Math.max(0, Math.min(FULL_CHARGE_SECONDS, seconds)));
+        goggles.setItemMeta(meta);
+    }
+
+    /** Once a second: drain worn goggles, grant sight while there's charge. */
     @Override
     public void run() {
         for (Player player : plugin.getServer().getOnlinePlayers()) {
-            if (isGoggles(player.getInventory().getHelmet())) {
-                wasWearing.add(player.getUniqueId());
-                // 15s window refreshed every second - never blinks dark
-                player.addPotionEffect(new PotionEffect(PotionEffectType.NIGHT_VISION,
-                    300, 0, true, false));
-            } else if (wasWearing.remove(player.getUniqueId())) {
+            ItemStack helmet = player.getInventory().getHelmet();
+            if (isGoggles(helmet)) {
+                int left = charge(helmet) - 1;
+                setCharge(helmet, left);
+                if (left > 0) {
+                    wasSeeing.add(player.getUniqueId());
+                    player.addPotionEffect(new PotionEffect(PotionEffectType.NIGHT_VISION,
+                        300, 0, true, false));
+                    if (left == LOW_WARN_SECONDS) {
+                        player.sendActionBar(line("The goggles whine. Low battery."));
+                        player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_BIT, 0.6f, 0.6f);
+                    }
+                } else {
+                    if (wasSeeing.remove(player.getUniqueId())) {
+                        player.removePotionEffect(PotionEffectType.NIGHT_VISION);
+                        player.sendActionBar(line("The goggles die."));
+                        player.playSound(player.getLocation(), Sound.BLOCK_LEVER_CLICK, 0.7f, 0.5f);
+                    }
+                }
+            } else if (wasSeeing.remove(player.getUniqueId())) {
                 player.removePotionEffect(PotionEffectType.NIGHT_VISION);
             }
         }
+    }
+
+    /** A 9V in hand: right-click feeds the goggles a fresh cell. */
+    @EventHandler
+    public void onRecharge(PlayerInteractEvent event) {
+        if (event.getAction() != Action.RIGHT_CLICK_AIR
+            && event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
+        ItemStack battery = event.getItem();
+        if (!isBattery(battery)) return;
+        event.setCancelled(true);
+        Player player = event.getPlayer();
+
+        ItemStack goggles = null;
+        if (isGoggles(player.getInventory().getHelmet())) {
+            goggles = player.getInventory().getHelmet();
+        } else {
+            for (ItemStack item : player.getInventory().getContents()) {
+                if (isGoggles(item)) { goggles = item; break; }
+            }
+        }
+        if (goggles == null) {
+            player.sendActionBar(line("Nothing to power."));
+            return;
+        }
+        if (charge(goggles) >= FULL_CHARGE_SECONDS - 5) {
+            player.sendActionBar(line("Still charged."));
+            return;
+        }
+        setCharge(goggles, FULL_CHARGE_SECONDS);
+        battery.setAmount(battery.getAmount() - 1);
+        player.sendActionBar(line("Fresh cell. The dark turns green."));
+        player.playSound(player.getLocation(), Sound.BLOCK_IRON_TRAPDOOR_CLOSE, 0.7f, 1.6f);
+    }
+
+    private Component line(String text) {
+        return Component.text(text, NamedTextColor.GRAY, TextDecoration.ITALIC);
     }
 }
