@@ -52,7 +52,7 @@ public final class Scp008Listener implements Listener {
         victim.getWorld().playSound(victim.getLocation(), Sound.ITEM_BOTTLE_EMPTY, 0.8f, 0.7f);
         Bukkit.dispatchCommand(Bukkit.getConsoleSender(),
             "execute as " + victim.getUniqueId() + " run function lab:scp008/infect");
-        attacker.sendActionBar(Component.text("The plunger goes down.",
+        ActionBars.message(attacker, Component.text("The plunger goes down.",
             NamedTextColor.GRAY, TextDecoration.ITALIC));
     }
 
@@ -64,11 +64,11 @@ public final class Scp008Listener implements Listener {
         if (!(event.getEntity() instanceof Player victim)) return;
         if (registry.hasFullHazmat(victim)) {
             switch (registry.wearHazmat(victim)) {
-                case 0 -> victim.sendActionBar(Component.text("Claws rake across the suit.",
+                case 0 -> ActionBars.message(victim, Component.text("Claws rake across the suit.",
                     NamedTextColor.GRAY, TextDecoration.ITALIC));
                 case 1 -> {
                     victim.getWorld().playSound(victim.getLocation(), Sound.ENTITY_ITEM_BREAK, 1f, 0.8f);
-                    victim.sendActionBar(Component.text("The suit tears open.",
+                    ActionBars.message(victim, Component.text("The suit tears open.",
                         NamedTextColor.RED, TextDecoration.ITALIC));
                 }
             }

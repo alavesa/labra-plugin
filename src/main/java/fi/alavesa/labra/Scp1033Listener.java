@@ -103,7 +103,7 @@ public final class Scp1033Listener implements Listener, Runnable {
                         Trinkets.setActive(item, false);
                     }
                 }
-                player.sendActionBar(Component.text("The bracelet is satisfied.",
+                ActionBars.message(player, Component.text("The bracelet is satisfied.",
                     NamedTextColor.DARK_RED, TextDecoration.ITALIC));
                 player.setHealth(0.0);
             } else {

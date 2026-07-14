@@ -80,7 +80,7 @@ public final class NvgListener implements Listener, Runnable {
                         300, 0, true, false));
                     int segments = (int) Math.ceil(left * 10.0 / FULL_CHARGE_SECONDS);
                     Integer previous = lastSegments.put(player.getUniqueId(), segments);
-                    player.sendActionBar(batteryBar(segments)); // always on display
+                    ActionBars.persistent(player, batteryGlyph(segments), 46);
                     if (previous != null && segments <= 2 && previous != segments) {
                         player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_BIT, 0.6f, 0.6f);
                     }
@@ -89,10 +89,12 @@ public final class NvgListener implements Listener, Runnable {
                         player.playSound(player.getLocation(), Sound.BLOCK_LEVER_CLICK, 0.7f, 0.5f);
                     }
                     player.removePotionEffect(PotionEffectType.NIGHT_VISION);
-                    player.sendActionBar(batteryBar(0)); // an empty dead frame, always
+                    ActionBars.persistent(player, batteryGlyph(0), 46); // dead frame, always
                 }
             } else {
-                lastSegments.remove(player.getUniqueId());
+                if (lastSegments.remove(player.getUniqueId()) != null) {
+                    ActionBars.clearPersistent(player);
+                }
                 if (wasSeeing.remove(player.getUniqueId())) {
                     player.removePotionEffect(PotionEffectType.NIGHT_VISION);
                 }
@@ -119,27 +121,25 @@ public final class NvgListener implements Listener, Runnable {
             }
         }
         if (goggles == null) {
-            player.sendActionBar(line("Nothing to power."));
+            ActionBars.message(player, line("Nothing to power."));
             return;
         }
         if (charge(goggles) >= FULL_CHARGE_SECONDS - 5) {
-            player.sendActionBar(line("Still charged."));
+            ActionBars.message(player, line("Still charged."));
             return;
         }
         setCharge(goggles, FULL_CHARGE_SECONDS);
         battery.setAmount(battery.getAmount() - 1);
-        player.sendActionBar(line("Fresh cell. The dark turns green."));
+        ActionBars.message(player, line("Fresh cell. The dark turns green."));
         player.playSound(player.getLocation(), Sound.BLOCK_IRON_TRAPDOOR_CLOSE, 0.7f, 1.6f);
     }
 
-    /** [||||||----] - green bars for charge, dark gray for the spent part,
-     *  the whole thing red-tinted at 2 segments and under. */
-    private Component batteryBar(int segments) {
-        NamedTextColor full = segments <= 2 ? NamedTextColor.RED : NamedTextColor.GREEN;
-        return Component.text("[", NamedTextColor.GRAY)
-            .append(Component.text("|".repeat(segments), full))
-            .append(Component.text("-".repeat(10 - segments), NamedTextColor.DARK_GRAY))
-            .append(Component.text("]", NamedTextColor.GRAY));
+    /** One lab:hud glyph per charge state - drawn BELOW the message line,
+     *  right above the hotbar (negative ascent in the font). */
+    private Component batteryGlyph(int segments) {
+        return Component.text(String.valueOf((char) (0xE200 + segments)))
+            .font(net.kyori.adventure.key.Key.key("lab", "hud"))
+            .color(NamedTextColor.WHITE);
     }
 
     private Component line(String text) {

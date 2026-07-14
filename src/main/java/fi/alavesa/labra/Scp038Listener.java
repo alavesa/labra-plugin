@@ -75,12 +75,12 @@ public final class Scp038Listener implements Listener, Runnable {
         long until = thrower.getPersistentDataContainer()
             .getOrDefault(cooldownKey, PersistentDataType.LONG, 0L);
         if (now < until) {
-            thrower.sendActionBar(Component.text("The branch is bare.",
+            ActionBars.message(thrower, Component.text("The branch is bare.",
                 NamedTextColor.GRAY, TextDecoration.ITALIC));
             return;
         }
         if (refuses(drop.getItemStack())) {
-            thrower.sendActionBar(Component.text("It refuses.",
+            ActionBars.message(thrower, Component.text("It refuses.",
                 NamedTextColor.GRAY, TextDecoration.ITALIC));
             tree.getWorld().playSound(tree.getLocation(), Sound.BLOCK_SWEET_BERRY_BUSH_BREAK, 0.6f, 0.6f);
             return;
@@ -97,7 +97,7 @@ public final class Scp038Listener implements Listener, Runnable {
             ThreadLocalRandom.current().nextDouble(-0.08, 0.08)));
         tree.getWorld().spawnParticle(Particle.COMPOSTER, canopy, 12, 0.4, 0.3, 0.4);
         tree.getWorld().playSound(canopy, Sound.BLOCK_CAVE_VINES_PICK_BERRIES, 0.8f, 0.9f);
-        thrower.sendActionBar(Component.text("A fruit that is not a fruit.",
+        ActionBars.message(thrower, Component.text("A fruit that is not a fruit.",
             NamedTextColor.GRAY, TextDecoration.ITALIC));
     }
 

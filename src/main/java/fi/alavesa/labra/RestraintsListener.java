@@ -86,19 +86,19 @@ public final class RestraintsListener implements Listener, Runnable {
         event.setCancelled(true); // never actually eaten
         Player captor = event.getPlayer();
         if (type.equals("handcuffs") && prisonerOf.containsKey(captor.getUniqueId())) {
-            captor.sendActionBar(line("You already have a prisoner.", NamedTextColor.GRAY));
+            ActionBars.message(captor, line("You already have a prisoner.", NamedTextColor.GRAY));
             return;
         }
         Entity target = captor.getTargetEntity(3);
         if (!(target instanceof Player victim) || isRestrained(victim)) {
-            captor.sendActionBar(line("No one within reach.", NamedTextColor.GRAY));
+            ActionBars.message(captor, line("No one within reach.", NamedTextColor.GRAY));
             return;
         }
         Vector toCaptor = captor.getLocation().toVector()
             .subtract(victim.getLocation().toVector()).setY(0);
         if (toCaptor.lengthSquared() < 0.01
             || toCaptor.normalize().dot(victim.getLocation().getDirection().setY(0).normalize()) > BEHIND_DOT) {
-            captor.sendActionBar(line("Not from the front.", NamedTextColor.GRAY));
+            ActionBars.message(captor, line("Not from the front.", NamedTextColor.GRAY));
             return;
         }
         victim.getPersistentDataContainer().set(restrainedKey, PersistentDataType.STRING, type);
@@ -110,9 +110,9 @@ public final class RestraintsListener implements Listener, Runnable {
             captorOf.put(victim.getUniqueId(), captor.getUniqueId());
         }
         victim.getWorld().playSound(victim.getLocation(), Sound.BLOCK_TRIPWIRE_CLICK_ON, 1f, 0.7f);
-        victim.sendActionBar(line(type.equals("ziptie")
+        ActionBars.message(victim, line(type.equals("ziptie")
             ? "Your hands are tied." : "You have been cuffed.", NamedTextColor.RED));
-        captor.sendActionBar(line("Detained.", NamedTextColor.GRAY));
+        ActionBars.message(captor, line("Detained.", NamedTextColor.GRAY));
     }
 
     // ------------------------------------------------------------- captivity
@@ -147,11 +147,11 @@ public final class RestraintsListener implements Listener, Runnable {
                 if (player.isSneaking()) {
                     int seconds = struggling.merge(player.getUniqueId(), 1, Integer::sum);
                     if (seconds % 5 == 0 && seconds < STRUGGLE_SECONDS) {
-                        player.sendActionBar(line("The tie digs in...", NamedTextColor.GRAY));
+                        ActionBars.message(player, line("The tie digs in...", NamedTextColor.GRAY));
                     }
                     if (seconds >= STRUGGLE_SECONDS) {
                         free(player);
-                        player.sendActionBar(line("The tie snaps.", NamedTextColor.GRAY));
+                        ActionBars.message(player, line("The tie snaps.", NamedTextColor.GRAY));
                         player.getWorld().playSound(player.getLocation(),
                             Sound.ENTITY_LEASH_KNOT_BREAK, 1f, 1.4f);
                     }
@@ -187,8 +187,8 @@ public final class RestraintsListener implements Listener, Runnable {
         event.setCancelled(true);
         free(victim);
         victim.getWorld().playSound(victim.getLocation(), Sound.BLOCK_TRIPWIRE_CLICK_OFF, 1f, 1.1f);
-        victim.sendActionBar(line("Your hands are free.", NamedTextColor.GRAY));
-        releaser.sendActionBar(line("Released.", NamedTextColor.GRAY));
+        ActionBars.message(victim, line("Your hands are free.", NamedTextColor.GRAY));
+        ActionBars.message(releaser, line("Released.", NamedTextColor.GRAY));
     }
 
     // ------------------------------------------- what bound hands cannot do
@@ -197,7 +197,7 @@ public final class RestraintsListener implements Listener, Runnable {
     public void onAttack(EntityDamageByEntityEvent event) {
         if (event.getDamager() instanceof Player player && isRestrained(player)) {
             event.setCancelled(true);
-            player.sendActionBar(line("Your hands are bound.", NamedTextColor.GRAY));
+            ActionBars.message(player, line("Your hands are bound.", NamedTextColor.GRAY));
         }
     }
 
@@ -219,7 +219,7 @@ public final class RestraintsListener implements Listener, Runnable {
     public void onInventoryOpen(InventoryOpenEvent event) {
         if (event.getPlayer() instanceof Player player && isRestrained(player)) {
             event.setCancelled(true);
-            player.sendActionBar(line("Your hands are bound.", NamedTextColor.GRAY));
+            ActionBars.message(player, line("Your hands are bound.", NamedTextColor.GRAY));
         }
     }
 

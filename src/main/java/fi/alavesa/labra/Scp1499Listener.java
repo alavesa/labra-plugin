@@ -77,7 +77,7 @@ public final class Scp1499Listener implements Listener, Runnable {
     private void enter(Player player) {
         Location anchor = registry.scp1499Anchor();
         if (anchor == null) {
-            player.sendActionBar(Component.text("It smells of dust. Nothing happens.",
+            ActionBars.message(player, Component.text("It smells of dust. Nothing happens.",
                 NamedTextColor.GRAY, TextDecoration.ITALIC));
             return;
         }

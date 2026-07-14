@@ -103,7 +103,7 @@ public final class Trinkets implements Listener {
         boolean nowActive = !isActive(item);
         setActive(item, nowActive);
         Player player = event.getPlayer();
-        player.sendActionBar(Component.text(LINES.get(base)[nowActive ? 0 : 1],
+        ActionBars.message(player, Component.text(LINES.get(base)[nowActive ? 0 : 1],
             NamedTextColor.GRAY, TextDecoration.ITALIC));
         player.playSound(player.getLocation(),
             nowActive ? Sound.ITEM_ARMOR_EQUIP_CHAIN : Sound.ITEM_ARMOR_EQUIP_LEATHER,

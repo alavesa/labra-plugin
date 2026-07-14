@@ -88,12 +88,12 @@ public final class Scp427Listener implements Listener, Runnable {
                 player.getWorld().spawnParticle(org.bukkit.Particle.FALLING_WATER,
                     player.getLocation().add(0, 1.6, 0), 3, 0.2, 0.1, 0.2);
                 if (exposure == TRANSFORM_AT - 30) {
-                    player.sendActionBar(Component.text("You are sweating. It smells wrong.",
+                    ActionBars.message(player, Component.text("You are sweating. It smells wrong.",
                         NamedTextColor.GRAY, TextDecoration.ITALIC));
                 }
             }
             if (exposure == WARN_AT) {
-                player.sendActionBar(Component.text("Your flesh hums.",
+                ActionBars.message(player, Component.text("Your flesh hums.",
                     NamedTextColor.GRAY, TextDecoration.ITALIC));
             }
             if (exposure >= TRANSFORM_AT) transform(player);

@@ -28,6 +28,7 @@ public final class LabraPlugin extends JavaPlugin {
 
     @Override
     public void onEnable() {
+        ActionBars.start(this);
         registry = new LabRegistry(this);
         registry.load();
         machineGuis = new MachineGuiListener(this);

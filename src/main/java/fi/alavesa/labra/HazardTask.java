@@ -44,7 +44,7 @@ public final class HazardTask implements Runnable {
             // Carrying a radioactive sample without a suit hurts - no ☢ text, just the taste
             if (!suited && registry.hasSample(player)) {
                 player.addPotionEffect(new PotionEffect(PotionEffectType.WITHER, 45, 0));
-                player.sendActionBar(METAL_TASTE);
+                ActionBars.message(player, METAL_TASTE);
             }
 
             Zone inside = null;
@@ -66,7 +66,7 @@ public final class HazardTask implements Runnable {
             }
 
             if (inside == null) {
-                if (metalTaste) player.sendActionBar(METAL_TASTE);
+                if (metalTaste) ActionBars.message(player, METAL_TASTE);
                 continue;
             }
 
@@ -78,7 +78,7 @@ public final class HazardTask implements Runnable {
             if (suited) {
                 // Radiation stays invisible even when protected; gas/cold you can feel
                 if (!inside.type().equals("radiation")) {
-                    player.sendActionBar(Component.text("Hazmat suit protecting you ("
+                    ActionBars.message(player, Component.text("Hazmat suit protecting you ("
                         + inside.type() + " zone)", NamedTextColor.GREEN));
                 }
                 continue;
@@ -87,19 +87,19 @@ public final class HazardTask implements Runnable {
             switch (inside.type()) {
                 case "toxic" -> {
                     player.addPotionEffect(new PotionEffect(PotionEffectType.POISON, 45, 0));
-                    player.sendActionBar(Component.text("☠ TOXIC ZONE - get a hazmat suit!",
+                    ActionBars.message(player, Component.text("☠ TOXIC ZONE - get a hazmat suit!",
                         NamedTextColor.DARK_GREEN));
                 }
                 case "cryo" -> {
                     player.setFreezeTicks(Math.min(player.getMaxFreezeTicks() + 40,
                         player.getFreezeTicks() + 60));
                     player.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, 45, 1));
-                    player.sendActionBar(Component.text("❄ CRYO ZONE - get a hazmat suit!",
+                    ActionBars.message(player, Component.text("❄ CRYO ZONE - get a hazmat suit!",
                         NamedTextColor.AQUA));
                 }
                 default -> { // radiation: damage + the taste, nothing else gives it away
                     player.addPotionEffect(new PotionEffect(PotionEffectType.WITHER, 45, 0));
-                    player.sendActionBar(METAL_TASTE);
+                    ActionBars.message(player, METAL_TASTE);
                 }
             }
         }
@@ -140,6 +140,6 @@ public final class HazardTask implements Runnable {
         if (tick % 2 == 0) {
             player.playSound(player.getLocation(), "minecraft:block.water.ambient", 0.6f, 1.4f);
         }
-        player.sendActionBar(Component.text("Decontaminating...", NamedTextColor.AQUA));
+        ActionBars.message(player, Component.text("Decontaminating...", NamedTextColor.AQUA));
     }
 }

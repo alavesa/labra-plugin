@@ -65,7 +65,7 @@ public final class Scp268Listener implements Listener, Runnable {
         for (Player player : plugin.getServer().getOnlinePlayers()) {
             if (!isCap(player.getInventory().getHelmet())) continue;
             if (onCooldown(player)) {
-                player.sendActionBar(Component.text("Not yet. It remembers.",
+                ActionBars.message(player, Component.text("Not yet. It remembers.",
                     NamedTextColor.GRAY, TextDecoration.ITALIC));
                 continue;
             }
@@ -115,7 +115,7 @@ public final class Scp268Listener implements Listener, Runnable {
         player.getPersistentDataContainer().set(cooldownKey, PersistentDataType.LONG,
             System.currentTimeMillis() + COOLDOWN_MS);
         player.playSound(player.getLocation(), Sound.ITEM_ARMOR_EQUIP_LEATHER, 0.8f, 0.7f);
-        player.sendActionBar(Component.text("The cap slips from your head.",
+        ActionBars.message(player, Component.text("The cap slips from your head.",
             NamedTextColor.GRAY, TextDecoration.ITALIC));
     }
 }

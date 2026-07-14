@@ -62,7 +62,7 @@ public final class GeigerTask implements Runnable {
             if (intensity <= 0) {
                 if (tick % 8 == 0) { // calm background tick every 2s
                     player.playSound(player.getLocation(), "minecraft:block.note_block.hat", 0.15f, 1.6f);
-                    player.sendActionBar(Component.text("☢ 0 µSv/h", NamedTextColor.GREEN));
+                    ActionBars.message(player, Component.text("☢ 0 µSv/h", NamedTextColor.GREEN));
                 }
                 continue;
             }
@@ -76,7 +76,7 @@ public final class GeigerTask implements Runnable {
             int reading = (int) Math.round(intensity * intensity * 999);
             NamedTextColor color = intensity > 0.7 ? NamedTextColor.RED
                 : intensity > 0.4 ? NamedTextColor.YELLOW : NamedTextColor.GREEN;
-            player.sendActionBar(Component.text("☢ " + reading + " µSv/h", color));
+            ActionBars.message(player, Component.text("☢ " + reading + " µSv/h", color));
         }
     }
 }

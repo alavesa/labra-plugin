@@ -95,10 +95,10 @@ public final class DownedListener implements Listener, Runnable {
         victim.addPotionEffect(new PotionEffect(PotionEffectType.DARKNESS, 60, 0, true, false));
         blood(victim, 24); // the moment of collapse leaves a mark
         victim.getWorld().playSound(victim.getLocation(), Sound.ENTITY_PLAYER_BIG_FALL, 1f, 0.6f);
-        victim.sendActionBar(line("You are down.", NamedTextColor.RED));
+        ActionBars.message(victim, line("You are down.", NamedTextColor.RED));
         if (event instanceof EntityDamageByEntityEvent byEntity
             && byEntity.getDamager() instanceof Player attacker) {
-            attacker.sendActionBar(line("They're down. Finish it - or don't.", NamedTextColor.GRAY));
+            ActionBars.message(attacker, line("They're down. Finish it - or don't.", NamedTextColor.GRAY));
         }
     }
 
@@ -118,7 +118,7 @@ public final class DownedListener implements Listener, Runnable {
                 player.setHealth(Math.min(4.0, player.getAttribute(Attribute.MAX_HEALTH).getValue()));
                 player.addPotionEffect(new PotionEffect(PotionEffectType.WEAKNESS, 300, 0, true, false));
                 player.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, 200, 0, true, false));
-                player.sendActionBar(line("You pull yourself together.", NamedTextColor.GRAY));
+                ActionBars.message(player, line("You pull yourself together.", NamedTextColor.GRAY));
                 player.getWorld().playSound(player.getLocation(), Sound.ENTITY_PLAYER_BREATH, 0.8f, 0.8f);
                 continue;
             }
@@ -126,7 +126,7 @@ public final class DownedListener implements Listener, Runnable {
             player.addPotionEffect(new PotionEffect(PotionEffectType.MINING_FATIGUE, 45, 2, true, false));
             player.addPotionEffect(new PotionEffect(PotionEffectType.WEAKNESS, 45, 1, true, false));
             blood(player, 6);
-            player.sendActionBar(Component.text("You are down. ", NamedTextColor.RED,
+            ActionBars.message(player, Component.text("You are down. ", NamedTextColor.RED,
                     TextDecoration.ITALIC)
                 .append(Component.text("Hold on. " + left + "s", NamedTextColor.DARK_RED, TextDecoration.ITALIC)));
             if (left % 2 == 0) {
@@ -207,12 +207,12 @@ public final class DownedListener implements Listener, Runnable {
         if (patient == null) {
             // nobody bleeding: the kit patches the holder's scrapes instead
             if (medic.getHealth() >= 19.5) {
-                medic.sendActionBar(line("Nothing to treat.", NamedTextColor.GRAY));
+                ActionBars.message(medic, line("Nothing to treat.", NamedTextColor.GRAY));
                 return;
             }
             medic.setHealth(Math.min(20.0, medic.getHealth() + 8.0));
             spend(medic);
-            medic.sendActionBar(line("Patched up.", NamedTextColor.GRAY));
+            ActionBars.message(medic, line("Patched up.", NamedTextColor.GRAY));
             return;
         }
         downed.remove(patient.getUniqueId());
@@ -221,8 +221,8 @@ public final class DownedListener implements Listener, Runnable {
         patient.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, 200, 0, true, false));
         spend(medic);
         patient.getWorld().playSound(patient.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 0.5f, 1.6f);
-        patient.sendActionBar(line("Back on your feet.", NamedTextColor.GRAY));
-        if (patient != medic) medic.sendActionBar(line("They'll live.", NamedTextColor.GRAY));
+        ActionBars.message(patient, line("Back on your feet.", NamedTextColor.GRAY));
+        if (patient != medic) ActionBars.message(medic, line("They'll live.", NamedTextColor.GRAY));
     }
 
     private void spend(Player medic) {

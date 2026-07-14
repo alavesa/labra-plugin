@@ -282,7 +282,7 @@ public final class MachineGuiListener implements Listener {
             Entity machine = Bukkit.getEntity(session.machine);
             if (machine == null) { player.closeInventory(); return; }
             if (!takeQuarters(player, 2)) {
-                player.sendActionBar(Component.text("SCP-294 requires two Quarters.", NamedTextColor.GRAY));
+                ActionBars.message(player, Component.text("SCP-294 requires two Quarters.", NamedTextColor.GRAY));
                 player.playSound(player.getLocation(), org.bukkit.Sound.BLOCK_DISPENSER_FAIL, 0.7f, 0.9f);
                 return;
             }
