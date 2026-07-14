@@ -14,10 +14,10 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * SCP-714, the jaded ring. Held in the off hand it closes the mind's doors:
+ * SCP-714, the jaded ring. Activated by right-click (see Trinkets) it closes the mind's doors:
  * poison, wither and nausea simply don't take (which covers SCP-049's touch,
  * SCP-008's fever nausea, and ordinary venom alike). The price is the jade
- * drowsiness - permanent Mining Fatigue II and Slowness I while held.
+ * drowsiness - permanent Mining Fatigue II and Slowness I while worn.
  *
  * Other code (present or future) can ask {@link #isWearing(Player)}.
  */
@@ -30,11 +30,10 @@ public final class Scp714Listener implements Listener, Runnable {
         this.plugin = plugin;
     }
 
-    /** True while the jaded ring sits in this player's off hand. */
+    /** True while an ACTIVATED ring (right-click toggle, white frame) is
+     *  anywhere in this player's inventory. */
     public static boolean isWearing(Player player) {
-        ItemStack off = player.getInventory().getItemInOffHand();
-        if (off == null || off.getType() != Material.GOLD_NUGGET || !off.hasItemMeta()) return false;
-        return off.getItemMeta().getCustomModelDataComponent().getStrings().contains("scp714");
+        return Trinkets.hasActive(player, "scp714");
     }
 
     /** Once a second: refresh the drowsiness, lift it when the ring is put away. */

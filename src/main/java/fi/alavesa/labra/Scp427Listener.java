@@ -47,7 +47,7 @@ public final class Scp427Listener implements Listener, Runnable {
     @Override
     public void run() {
         for (Player player : plugin.getServer().getOnlinePlayers()) {
-            if (!isTalisman(player.getInventory().getItemInOffHand())) continue;
+            if (!Trinkets.hasActive(player, "scp427")) continue;
             player.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, 45, 1, true, false));
             rewind(player, "lab.inf");
             rewind(player, "lab.cola");

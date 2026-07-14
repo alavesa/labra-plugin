@@ -3,94 +3,107 @@ package fi.alavesa.labra;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
-import org.bukkit.Location;
-import org.bukkit.Material;
-import org.bukkit.NamespacedKey;
+import org.bukkit.Particle;
 import org.bukkit.Sound;
-import org.bukkit.attribute.Attribute;
+import org.bukkit.entity.Entity;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Projectile;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
-import org.bukkit.event.block.Action;
-import org.bukkit.event.player.PlayerInteractEvent;
-import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.persistence.PersistentDataType;
-import org.bukkit.potion.PotionEffect;
-import org.bukkit.potion.PotionEffectType;
 
-import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
 /**
- * SCP-1033, the 33 Second Man. The plugin quietly remembers where every
- * player stood - and how whole and how fed they were - for the last 33
- * seconds. Right-clicking the pocket watch winds its holder back to the
- * oldest memory: position, health and hunger, exactly as they were. The
- * hands then refuse to move again for five minutes.
+ * SCP-1033-RU, the "Universal Protector": a ceramic bracelet that lets no
+ * serious harm reach its carrier - twelve unseen probes see to it. Anything
+ * that ATTACKS the carrier inside ten meters is answered instantly and
+ * brutally (the "sense of aggressor"). None of it is free: every act of
+ * protection is paid for in the carrier's blood, drained heartbeat by
+ * heartbeat afterwards - a debt the bracelet always collects, up to and
+ * including everything. Full exsanguination separates the bracelet.
+ *
+ * Toggled on/off by right-click like the other trinkets ({@link Trinkets});
+ * active from any inventory slot.
  */
 public final class Scp1033Listener implements Listener, Runnable {
 
-    private static final int MEMORY_SECONDS = 33;
-    private static final long COOLDOWN_MS = 5 * 60_000L;
-
-    private record Moment(Location where, double health, int food) { }
+    private static final double RETALIATION_DAMAGE = 20.0;
+    private static final double RETALIATION_BLOOD = 4.0;
+    private static final double DRAIN_PER_SECOND = 1.0;
 
     private final LabraPlugin plugin;
-    private final NamespacedKey cooldownKey;
-    private final Map<UUID, ArrayDeque<Moment>> memory = new HashMap<>();
+    /** Outstanding blood debt per carrier, in half-hearts. In-memory only:
+     *  a relog forgives the remainder - the Foundation never said the
+     *  paperwork was fair in the other direction. */
+    private final Map<UUID, Double> debt = new HashMap<>();
 
     public Scp1033Listener(LabraPlugin plugin) {
         this.plugin = plugin;
-        this.cooldownKey = new NamespacedKey(plugin, "scp1033_cd");
     }
 
-    private boolean isWatch(ItemStack item) {
-        if (item == null || item.getType() != Material.CLOCK || !item.hasItemMeta()) return false;
-        return item.getItemMeta().getCustomModelDataComponent().getStrings().contains("scp1033");
+    /** All protection goes through here: harm is refused and billed. */
+    @EventHandler(ignoreCancelled = true)
+    public void onHarm(EntityDamageEvent event) {
+        if (!(event.getEntity() instanceof Player carrier)) return;
+        if (!Trinkets.hasActive(carrier, "scp1033")) return;
+        // the drain arrives via setHealth, not the damage system, so any
+        // damage event here is genuinely external - refuse it and bill it
+        event.setCancelled(true);
+        addDebt(carrier, event.getDamage() * 0.75);
+
+        if (event instanceof EntityDamageByEntityEvent byEntity) {
+            Entity aggressor = byEntity.getDamager() instanceof Projectile projectile
+                && projectile.getShooter() instanceof Entity shooter ? shooter : byEntity.getDamager();
+            if (aggressor instanceof LivingEntity living && !living.equals(carrier)
+                && living.getWorld().equals(carrier.getWorld())
+                && living.getLocation().distanceSquared(carrier.getLocation()) <= 100) {
+                living.damage(RETALIATION_DAMAGE, carrier);
+                living.getWorld().playSound(living.getLocation(), Sound.ENTITY_PLAYER_ATTACK_CRIT, 1f, 0.5f);
+                living.getWorld().spawnParticle(Particle.CRIT, living.getLocation().add(0, 1, 0),
+                    20, 0.3, 0.5, 0.3, 0.1);
+                addDebt(carrier, RETALIATION_BLOOD);
+            }
+        }
     }
 
-    /** Once a second: one more memory for everyone, the oldest one forgotten. */
+    private void addDebt(Player carrier, double amount) {
+        debt.merge(carrier.getUniqueId(), amount, Double::sum);
+        carrier.getWorld().spawnParticle(Particle.DUST, carrier.getLocation().add(0, 1, 0), 6,
+            0.25, 0.4, 0.25, new Particle.DustOptions(org.bukkit.Color.fromRGB(140, 10, 10), 1.0f));
+    }
+
+    /** Once a second: the bracelet collects. */
     @Override
     public void run() {
         for (Player player : plugin.getServer().getOnlinePlayers()) {
-            if (player.isDead()) continue;
-            ArrayDeque<Moment> moments = memory.computeIfAbsent(player.getUniqueId(), id -> new ArrayDeque<>());
-            moments.addLast(new Moment(player.getLocation().clone(), player.getHealth(), player.getFoodLevel()));
-            while (moments.size() > MEMORY_SECONDS) moments.removeFirst();
+            Double owed = debt.get(player.getUniqueId());
+            if (owed == null || owed <= 0) continue;
+            if (!Trinkets.hasActive(player, "scp1033")) continue; // paused, not forgiven
+            double payment = Math.min(DRAIN_PER_SECOND, owed);
+            debt.put(player.getUniqueId(), owed - payment);
+            player.getWorld().spawnParticle(Particle.DUST, player.getLocation().add(0, 1.2, 0), 4,
+                0.2, 0.3, 0.2, new Particle.DustOptions(org.bukkit.Color.fromRGB(120, 8, 8), 0.8f));
+            if (player.getHealth() - payment <= 0.5) {
+                // full exsanguination: the bracelet separates on its own
+                debt.remove(player.getUniqueId());
+                for (ItemStack item : player.getInventory().getContents()) {
+                    if ("scp1033".equals(Trinkets.baseOf(item)) && Trinkets.isActive(item)) {
+                        Trinkets.setActive(item, false);
+                    }
+                }
+                player.sendActionBar(Component.text("The bracelet is satisfied.",
+                    NamedTextColor.DARK_RED, TextDecoration.ITALIC));
+                player.setHealth(0.0);
+            } else {
+                player.setHealth(player.getHealth() - payment);
+                player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_HURT_DROWN, 0.4f, 0.6f);
+            }
         }
-    }
-
-    @EventHandler
-    public void onUse(PlayerInteractEvent event) {
-        if (event.getAction() != Action.RIGHT_CLICK_AIR && event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
-        if (!isWatch(event.getItem())) return;
-        event.setCancelled(true);
-        Player player = event.getPlayer();
-        long now = System.currentTimeMillis();
-        long until = player.getPersistentDataContainer().getOrDefault(cooldownKey, PersistentDataType.LONG, 0L);
-        ArrayDeque<Moment> moments = memory.get(player.getUniqueId());
-        if (now < until || moments == null || moments.isEmpty()) {
-            player.sendActionBar(Component.text("The hands refuse to move.",
-                NamedTextColor.GRAY, TextDecoration.ITALIC));
-            return;
-        }
-        Moment then = moments.peekFirst();
-        player.getPersistentDataContainer().set(cooldownKey, PersistentDataType.LONG, now + COOLDOWN_MS);
-        player.teleport(then.where());
-        double max = player.getAttribute(Attribute.MAX_HEALTH).getValue();
-        player.setHealth(Math.max(1.0, Math.min(then.health(), max)));
-        player.setFoodLevel(then.food());
-        player.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, 60, 0, true, false));
-        player.playSound(then.where(), Sound.BLOCK_NOTE_BLOCK_HAT, 1.0f, 0.5f);
-        player.sendActionBar(Component.text("Thirty-three seconds.",
-            NamedTextColor.GRAY, TextDecoration.ITALIC));
-    }
-
-    @EventHandler
-    public void onQuit(PlayerQuitEvent event) {
-        memory.remove(event.getPlayer().getUniqueId());
     }
 }
