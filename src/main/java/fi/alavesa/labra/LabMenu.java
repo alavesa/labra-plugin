@@ -110,6 +110,11 @@ public final class LabMenu implements Listener {
             list.add(new Entry(Material.MINECART, "Car: " + id, NamedTextColor.GOLD,
                 null, "car spawn " + id));
         }
+        // --- the CCTV grid (terminal-plugin 0.5.0+)
+        list.add(new Entry(Material.OBSERVER, "Place: CCTV camera", NamedTextColor.YELLOW,
+            "terminal cctv place", null));
+        list.add(new Entry(Material.RECOVERY_COMPASS, "CCTV Monitor", NamedTextColor.AQUA,
+            "terminal cctv monitor", null));
         // --- placeable machines
         for (String machine : List.of("creator", "burner", "centrifuge", "fridge",
             "rack", "scp294", "scp038")) {
