@@ -36,6 +36,7 @@ public final class NvgListener implements Listener, Runnable {
     private final LabraPlugin plugin;
     private final NamespacedKey chargeKey;
     private final Set<UUID> wasSeeing = new HashSet<>();
+    private final java.util.Map<UUID, Integer> lastSegments = new java.util.HashMap<>();
 
     public NvgListener(LabraPlugin plugin) {
         this.plugin = plugin;
@@ -77,9 +78,14 @@ public final class NvgListener implements Listener, Runnable {
                     wasSeeing.add(player.getUniqueId());
                     player.addPotionEffect(new PotionEffect(PotionEffectType.NIGHT_VISION,
                         300, 0, true, false));
-                    if (left == LOW_WARN_SECONDS) {
-                        player.sendActionBar(line("The goggles whine. Low battery."));
-                        player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_BIT, 0.6f, 0.6f);
+                    int segments = (int) Math.ceil(left * 10.0 / FULL_CHARGE_SECONDS);
+                    Integer previous = lastSegments.put(player.getUniqueId(), segments);
+                    boolean lowPulse = left <= LOW_WARN_SECONDS && left % 10 == 0;
+                    if (previous == null || previous != segments || lowPulse) {
+                        player.sendActionBar(batteryBar(segments));
+                        if (lowPulse || (previous != null && segments <= 2 && previous != segments)) {
+                            player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_BIT, 0.6f, 0.6f);
+                        }
                     }
                 } else {
                     if (wasSeeing.remove(player.getUniqueId())) {
@@ -88,8 +94,11 @@ public final class NvgListener implements Listener, Runnable {
                         player.playSound(player.getLocation(), Sound.BLOCK_LEVER_CLICK, 0.7f, 0.5f);
                     }
                 }
-            } else if (wasSeeing.remove(player.getUniqueId())) {
-                player.removePotionEffect(PotionEffectType.NIGHT_VISION);
+            } else {
+                lastSegments.remove(player.getUniqueId());
+                if (wasSeeing.remove(player.getUniqueId())) {
+                    player.removePotionEffect(PotionEffectType.NIGHT_VISION);
+                }
             }
         }
     }
@@ -124,6 +133,16 @@ public final class NvgListener implements Listener, Runnable {
         battery.setAmount(battery.getAmount() - 1);
         player.sendActionBar(line("Fresh cell. The dark turns green."));
         player.playSound(player.getLocation(), Sound.BLOCK_IRON_TRAPDOOR_CLOSE, 0.7f, 1.6f);
+    }
+
+    /** [||||||----] - green bars for charge, dark gray for the spent part,
+     *  the whole thing red-tinted at 2 segments and under. */
+    private Component batteryBar(int segments) {
+        NamedTextColor full = segments <= 2 ? NamedTextColor.RED : NamedTextColor.GREEN;
+        return Component.text("[", NamedTextColor.GRAY)
+            .append(Component.text("|".repeat(segments), full))
+            .append(Component.text("-".repeat(10 - segments), NamedTextColor.DARK_GRAY))
+            .append(Component.text("]", NamedTextColor.GRAY));
     }
 
     private Component line(String text) {

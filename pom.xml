@@ -6,7 +6,7 @@
 
   <groupId>fi.alavesa</groupId>
   <artifactId>labra-plugin</artifactId>
-  <version>0.13.0</version>
+  <version>0.14.0</version>
   <packaging>jar</packaging>
 
   <name>Labra</name>
