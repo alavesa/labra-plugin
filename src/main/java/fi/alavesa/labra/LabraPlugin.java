@@ -25,6 +25,7 @@ public final class LabraPlugin extends JavaPlugin {
     private LabRegistry registry;
     private MachineGuiListener machineGuis;
     private LabMenu labMenu;
+    private HudTask hud;
 
     @Override
     public void onEnable() {
@@ -57,6 +58,8 @@ public final class LabraPlugin extends JavaPlugin {
         getServer().getScheduler().runTaskTimer(this, restraints, 40L, 20L);
         labMenu = new LabMenu(this);
         getServer().getPluginManager().registerEvents(labMenu, this);
+        hud = new HudTask(this);
+        getServer().getScheduler().runTaskTimer(this, hud, 40L, 20L);
         DownedListener dying = new DownedListener(this);
         getServer().getPluginManager().registerEvents(dying, this);
         getServer().getScheduler().runTaskTimer(this, dying, 40L, 20L);
@@ -81,6 +84,7 @@ public final class LabraPlugin extends JavaPlugin {
     @Override
     public void onDisable() {
         if (machineGuis != null) machineGuis.shutdown();
+        if (hud != null) hud.shutdown();
     }
 
     @Override
@@ -246,6 +250,12 @@ public final class LabraPlugin extends JavaPlugin {
                     }
                     return true;
                 }
+                case "hud" -> {
+                    if (!(sender instanceof Player player)) return error(sender, "Players only.");
+                    hud.toggle(player);
+                    sender.sendMessage(Component.text("Vitals HUD toggled.", NamedTextColor.AQUA));
+                    return true;
+                }
                 case "menu" -> {
                     if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
                     if (!(sender instanceof Player player)) return error(sender, "Players only.");
@@ -330,6 +340,10 @@ public final class LabraPlugin extends JavaPlugin {
     private void runAs(Player player, String function) {
         Bukkit.dispatchCommand(Bukkit.getConsoleSender(),
             "execute as " + player.getUniqueId() + " at @s run function " + function);
+    }
+
+    public org.bukkit.NamespacedKey keyOf(String name) {
+        return new org.bukkit.NamespacedKey(this, name);
     }
 
     private List<String> filter(Stream<String> options, String prefix) {
