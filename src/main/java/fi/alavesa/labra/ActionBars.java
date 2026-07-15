@@ -91,13 +91,16 @@ public final class ActionBars {
             player.sendActionBar(state.persistent());
             return;
         }
-        // text first, then rewind the cursor so the below-line bar sits
-        // centered under the text's center
+        // text, rewind to its center, draw the bar - then restore the
+        // cursor so the component's TOTAL advance equals the text width:
+        // the client centers by total width, so both the text and the bar
+        // land dead center regardless of message length
         int textWidth = pixelWidth(state.transientLine());
-        int rewind = textWidth / 2 + state.persistentWidth() / 2;
+        int barWidth = state.persistentWidth();
         player.sendActionBar(state.transientLine()
-            .append(advance(-rewind))
-            .append(state.persistent()));
+            .append(advance(-(textWidth / 2 + barWidth / 2)))
+            .append(state.persistent())
+            .append(advance(textWidth / 2 - barWidth / 2)));
     }
 
     /** Compose any pixel offset from the hud font's power-of-two spaces. */
