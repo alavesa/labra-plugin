@@ -38,17 +38,40 @@ public final class Scp427Listener implements Listener, Runnable {
     /** Who was already active last tick - re-activation is what clamps. */
     private final java.util.Set<java.util.UUID> recentlyActive = new java.util.HashSet<>();
 
-    /** Remove any 427 flesh-model display with no living ravager under it -
-     *  sweeps floaters left by older versions or a crash. */
+    /** Is this display a 427 flesh model? Match the tag OR the item_model,
+     *  so floaters from older versions (which may lack the tag) are caught. */
+    private boolean isBeastModel(org.bukkit.entity.ItemDisplay display) {
+        if (display.getScoreboardTags().contains("scp427.beast")) return true;
+        var item = display.getItemStack();
+        if (item == null || !item.hasItemMeta()) return false;
+        var model = item.getItemMeta().getItemModel();
+        return model != null && model.getNamespace().equals("lab")
+            && model.getKey().equals("scp427_1");
+    }
+
+    /** A beast model with no living ravager under it is a floater - kill it. */
+    private void removeIfOrphan(org.bukkit.entity.ItemDisplay display) {
+        if (!isBeastModel(display)) return;
+        var vehicle = display.getVehicle();
+        if (vehicle == null || !vehicle.getScoreboardTags().contains("scp427.beast")) {
+            display.remove();
+        }
+    }
+
+    /** Sweep every loaded chunk's floaters (startup). */
     public void sweepOrphans() {
         for (var world : plugin.getServer().getWorlds()) {
             for (var display : world.getEntitiesByClass(org.bukkit.entity.ItemDisplay.class)) {
-                if (display.getScoreboardTags().contains("scp427.beast")
-                    && (display.getVehicle() == null
-                        || !display.getVehicle().getScoreboardTags().contains("scp427.beast"))) {
-                    display.remove();
-                }
+                removeIfOrphan(display);
             }
+        }
+    }
+
+    /** ...and every chunk as it loads, so distant floaters clear when reached. */
+    @org.bukkit.event.EventHandler
+    public void onChunkLoad(org.bukkit.event.world.ChunkLoadEvent event) {
+        for (var entity : event.getChunk().getEntities()) {
+            if (entity instanceof org.bukkit.entity.ItemDisplay display) removeIfOrphan(display);
         }
     }
 
