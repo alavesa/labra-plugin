@@ -82,7 +82,17 @@ public final class Scp008Listener implements Listener {
     @EventHandler
     public void onDeath(PlayerDeathEvent event) {
         Player victim = event.getPlayer();
-        Objective objective = Bukkit.getScoreboardManager().getMainScoreboard().getObjective("lab.z008");
+        // Death stops the anomalies that the datapack ticks per-second: the
+        // SCP-009 infection (lab.inf) and the SCP-207 cola countdown (lab.cola).
+        // Without this a respawned player keeps ticking down from where they
+        // died. Null-guard the objectives (missing/old datapack).
+        var board = Bukkit.getScoreboardManager().getMainScoreboard();
+        Objective inf = board.getObjective("lab.inf");
+        if (inf != null) inf.getScore(victim.getName()).setScore(0);
+        Objective cola = board.getObjective("lab.cola");
+        if (cola != null) cola.getScore(victim.getName()).setScore(0);
+
+        Objective objective = board.getObjective("lab.z008");
         if (objective == null) return;
         var score = objective.getScore(victim.getName());
         if (!score.isScoreSet() || score.getScore() <= 0) return;

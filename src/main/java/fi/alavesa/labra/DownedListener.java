@@ -62,9 +62,26 @@ public final class DownedListener implements Listener, Runnable {
         return downed.containsKey(player.getUniqueId());
     }
 
+    /**
+     * Bring a downed player back to their feet: clear the downed flag, lift the
+     * 3-heart cap and the crawl/potion effects, and heal to a few hearts. Shared
+     * by the medkit path and the SCP-500 panacea. No-op if not downed.
+     */
+    public void revive(Player player) {
+        if (downed.remove(player.getUniqueId()) == null) return;
+        clearEffects(player); // lifts the 3-heart cap before healing past it
+        double target = Math.min(12.0, player.getAttribute(Attribute.MAX_HEALTH).getValue());
+        player.setHealth(target);
+    }
+
     private boolean isMedkit(ItemStack item) {
         if (item == null || !item.hasItemMeta()) return false;
         return item.getItemMeta().getCustomModelDataComponent().getStrings().contains("lab_medkit");
+    }
+
+    private boolean isScp500(ItemStack item) {
+        if (item == null || !item.hasItemMeta()) return false;
+        return item.getItemMeta().getCustomModelDataComponent().getStrings().contains("scp500");
     }
 
     // ------------------------------------------------------------- going down
@@ -215,14 +232,26 @@ public final class DownedListener implements Listener, Runnable {
             ActionBars.message(medic, line("Patched up.", NamedTextColor.GRAY));
             return;
         }
-        downed.remove(patient.getUniqueId());
-        clearEffects(patient); // lifts the 3-heart cap before healing past it
-        patient.setHealth(12.0);
+        revive(patient); // clears the downed flag, lifts the cap, heals to a few hearts
         patient.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, 200, 0, true, false));
         spend(medic);
         patient.getWorld().playSound(patient.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 0.5f, 1.6f);
         ActionBars.message(patient, line("Back on your feet.", NamedTextColor.GRAY));
         if (patient != medic) ActionBars.message(medic, line("They'll live.", NamedTextColor.GRAY));
+    }
+
+    /**
+     * SCP-500 (the panacea) is the datapack's job - it heals and clears
+     * infections - but the datapack cannot lift the plugin-side downed state
+     * (the 3-heart cap + flag), so its heal would be clamped and the player
+     * would stay down. Un-down them here on consume; the event is NOT cancelled
+     * so the datapack's advancement->consumed function still runs.
+     */
+    @EventHandler
+    public void onScp500(PlayerItemConsumeEvent event) {
+        if (!isScp500(event.getItem())) return;
+        Player player = event.getPlayer();
+        if (isDowned(player)) revive(player);
     }
 
     private void spend(Player medic) {

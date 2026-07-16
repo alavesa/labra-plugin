@@ -26,6 +26,7 @@ public final class LabraPlugin extends JavaPlugin {
     private MachineGuiListener machineGuis;
     private LabMenu labMenu;
     private HudTask hud;
+    private Scp268Listener scp268;
 
     @Override
     public void onEnable() {
@@ -35,7 +36,7 @@ public final class LabraPlugin extends JavaPlugin {
         machineGuis = new MachineGuiListener(this);
         getServer().getPluginManager().registerEvents(machineGuis, this);
         getServer().getPluginManager().registerEvents(new Scp008Listener(this, registry), this);
-        Scp268Listener scp268 = new Scp268Listener(this);
+        scp268 = new Scp268Listener(this);
         Scp1499Listener scp1499 = new Scp1499Listener(this, registry);
         Scp714Listener scp714 = new Scp714Listener(this);
         Scp427Listener scp427 = new Scp427Listener(this);
@@ -85,6 +86,7 @@ public final class LabraPlugin extends JavaPlugin {
     public void onDisable() {
         if (machineGuis != null) machineGuis.shutdown();
         if (hud != null) hud.shutdown();
+        if (scp268 != null) scp268.shutdown();
     }
 
     @Override
