@@ -87,12 +87,12 @@ public final class HudTask implements Runnable {
 
             BossBar bar = bars.get(player.getUniqueId());
             if (bar == null) {
-                bar = BossBar.bossBar(title, fraction, color, BossBar.Overlay.NOTCHED_20);
+                bar = BossBar.bossBar(title, 0f, color, BossBar.Overlay.PROGRESS);
                 bars.put(player.getUniqueId(), bar);
                 player.showBossBar(bar);
             } else {
                 bar.name(title);
-                bar.progress(fraction);
+                bar.progress(0f);
                 bar.color(color);
             }
         }
