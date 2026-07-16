@@ -99,6 +99,9 @@ public final class Scp268Listener implements Listener, Runnable {
         ItemStack air = new ItemStack(Material.AIR);
         for (Player other : plugin.getServer().getOnlinePlayers()) {
             if (other == wearer) continue;
+            // FULL invisibility: remove the wearer's entity entirely from
+            // every other client - no translucent shimmer, no armor, nothing
+            other.hidePlayer(plugin, wearer);
             for (EquipmentSlot slot : SLOTS) {
                 other.sendEquipmentChange(wearer, slot, air);
             }
@@ -112,6 +115,7 @@ public final class Scp268Listener implements Listener, Runnable {
         var inv = wearer.getInventory();
         for (Player other : plugin.getServer().getOnlinePlayers()) {
             if (other == wearer) continue;
+            other.showPlayer(plugin, wearer); // back into view
             other.sendEquipmentChange(wearer, EquipmentSlot.HEAD, orAir(inv.getHelmet()));
             other.sendEquipmentChange(wearer, EquipmentSlot.CHEST, orAir(inv.getChestplate()));
             other.sendEquipmentChange(wearer, EquipmentSlot.LEGS, orAir(inv.getLeggings()));
