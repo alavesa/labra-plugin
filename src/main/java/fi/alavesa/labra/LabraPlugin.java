@@ -71,6 +71,7 @@ public final class LabraPlugin extends JavaPlugin {
         getServer().getScheduler().runTaskTimer(this, scp1499, 40L, 20L);
         getServer().getScheduler().runTaskTimer(this, scp714, 40L, 20L);
         getServer().getScheduler().runTaskTimer(this, scp427, 40L, 20L);
+        getServer().getScheduler().runTask(this, scp427::sweepOrphans);
         getServer().getScheduler().runTaskTimer(this, scp1033, 40L, 20L);
         getLogger().info("Labra enabled - zones: " + registry.zones().keySet());
         getServer().getScheduler().runTaskLater(this, () -> {

@@ -9,8 +9,10 @@ import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Sound;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.Ravager;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.persistence.PersistentDataType;
@@ -35,6 +37,20 @@ public final class Scp427Listener implements Listener, Runnable {
     private final NamespacedKey exposureKey;
     /** Who was already active last tick - re-activation is what clamps. */
     private final java.util.Set<java.util.UUID> recentlyActive = new java.util.HashSet<>();
+
+    /** Remove any 427 flesh-model display with no living ravager under it -
+     *  sweeps floaters left by older versions or a crash. */
+    public void sweepOrphans() {
+        for (var world : plugin.getServer().getWorlds()) {
+            for (var display : world.getEntitiesByClass(org.bukkit.entity.ItemDisplay.class)) {
+                if (display.getScoreboardTags().contains("scp427.beast")
+                    && (display.getVehicle() == null
+                        || !display.getVehicle().getScoreboardTags().contains("scp427.beast"))) {
+                    display.remove();
+                }
+            }
+        }
+    }
 
     public Scp427Listener(LabraPlugin plugin) {
         this.plugin = plugin;
@@ -116,6 +132,17 @@ public final class Scp427Listener implements Listener, Runnable {
         var score = objective.getScore(player.getName());
         if (!score.isScoreSet() || score.getScore() <= 0) return;
         score.setScore(Math.max(0, score.getScore() - 2));
+    }
+
+    /** When SCP-427-1 dies its flesh-model display must die with it - a
+     *  passenger is only ejected, not removed, when its ravager dies, which
+     *  is what leaves the model floating. */
+    @org.bukkit.event.EventHandler
+    public void onBeastDeath(EntityDeathEvent event) {
+        if (!event.getEntity().getScoreboardTags().contains("scp427.beast")) return;
+        for (Entity rider : event.getEntity().getPassengers()) {
+            if (rider.getScoreboardTags().contains("scp427.beast")) rider.remove();
+        }
     }
 
     /** The ledger comes due. */
