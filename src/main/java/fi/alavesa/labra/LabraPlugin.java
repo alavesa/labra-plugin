@@ -20,13 +20,14 @@ public final class LabraPlugin extends JavaPlugin {
      *  load function writes). Commands that dispatch into the datapack check
      *  this first, so a missing/stale datapack fails LOUDLY instead of
      *  dispatching functions that silently don't exist. */
-    private static final int DATAPACK_VERSION = 26;
+    private static final int DATAPACK_VERSION = 27;
 
     private LabRegistry registry;
     private MachineGuiListener machineGuis;
     private LabMenu labMenu;
     private HudTask hud;
     private Scp268Listener scp268;
+    private Scp018Listener scp018;
 
     @Override
     public void onEnable() {
@@ -46,7 +47,9 @@ public final class LabraPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(scp714, this);
         getServer().getPluginManager().registerEvents(scp427, this);
         getServer().getPluginManager().registerEvents(scp1033, this);
-        getServer().getPluginManager().registerEvents(new Scp018Listener(this), this);
+        scp018 = new Scp018Listener(this);
+        getServer().getPluginManager().registerEvents(scp018, this);
+        getServer().getScheduler().runTaskTimer(this, scp018::restoreTick, 100L, 100L);
         Scp038Listener scp038 = new Scp038Listener(this);
         getServer().getPluginManager().registerEvents(scp038, this);
         getServer().getScheduler().runTaskTimer(this, scp038, 40L, 20L);
@@ -76,7 +79,7 @@ public final class LabraPlugin extends JavaPlugin {
         getLogger().info("Labra enabled - zones: " + registry.zones().keySet());
         getServer().getScheduler().runTaskLater(this, () -> {
             if (datapackVersion() < DATAPACK_VERSION) {
-                getLogger().warning("lab-datapack v0.26+ NOT detected in this world - /lab give/place");
+                getLogger().warning("lab-datapack v0.27+ NOT detected in this world - /lab give/place");
                 getLogger().warning("will refuse to run. Install Lab.zip from");
                 getLogger().warning("github.com/alavesa/lab-datapack/releases into world/datapacks/.");
             }
@@ -88,6 +91,7 @@ public final class LabraPlugin extends JavaPlugin {
         if (machineGuis != null) machineGuis.shutdown();
         if (hud != null) hud.shutdown();
         if (scp268 != null) scp268.shutdown();
+        if (scp018 != null) scp018.shutdown();
     }
 
     @Override
@@ -127,7 +131,7 @@ public final class LabraPlugin extends JavaPlugin {
                         case "kit", "rod", "pipette", "manual", "table",
                              "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "quarter",
                              "scp268", "scp1499", "scp714", "scp018", "scp427", "scp1033",
-                             "nvg", "ziptie", "handcuffs", "battery", "medkit" -> {
+                             "nvg", "ziptie", "handcuffs", "battery", "medkit", "scp005" -> {
                             if (!sender.hasPermission("lab.give")) return error(sender, "No permission.");
                             runAs(target, "lab:give/" + args[1].toLowerCase());
                             sender.sendMessage(Component.text("Gave lab " + args[1].toLowerCase()
@@ -289,7 +293,7 @@ public final class LabraPlugin extends JavaPlugin {
                     "pipette", "manual", "table", "element",
                     "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "quarter",
                     "scp268", "scp1499", "scp714", "scp018", "scp427", "scp1033",
-                    "nvg", "ziptie", "handcuffs", "battery", "medkit"), args[1]);
+                    "nvg", "ziptie", "handcuffs", "battery", "medkit", "scp005"), args[1]);
                 case "zone" -> filter(Stream.of("add", "remove", "list", "alarm"), args[1]);
                 case "scp1499" -> filter(Stream.of("sethere", "info"), args[1]);
                 case "place" -> filter(MACHINES.stream(), args[1]);
@@ -316,7 +320,7 @@ public final class LabraPlugin extends JavaPlugin {
         List.of("kit", "rod", "pipette", "manual", "table", "element",
             "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "quarter",
             "scp268", "scp1499", "scp714", "scp018", "scp427", "scp1033",
-            "nvg", "ziptie", "handcuffs", "battery", "medkit");
+            "nvg", "ziptie", "handcuffs", "battery", "medkit", "scp005");
 
     /** The lab-datapack's load function writes its version to #datapack in
      *  lab.var. No marker (or an old one) means dispatched functions would
