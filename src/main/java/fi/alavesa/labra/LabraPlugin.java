@@ -20,7 +20,7 @@ public final class LabraPlugin extends JavaPlugin {
      *  load function writes). Commands that dispatch into the datapack check
      *  this first, so a missing/stale datapack fails LOUDLY instead of
      *  dispatching functions that silently don't exist. */
-    private static final int DATAPACK_VERSION = 27;
+    private static final int DATAPACK_VERSION = 28;
 
     private LabRegistry registry;
     private MachineGuiListener machineGuis;
@@ -47,9 +47,11 @@ public final class LabraPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(scp714, this);
         getServer().getPluginManager().registerEvents(scp427, this);
         getServer().getPluginManager().registerEvents(scp1033, this);
+        getServer().getPluginManager().registerEvents(new Scp005Listener(), this);
         scp018 = new Scp018Listener(this);
         getServer().getPluginManager().registerEvents(scp018, this);
         getServer().getScheduler().runTaskTimer(this, scp018::restoreTick, 100L, 100L);
+        getServer().getScheduler().runTaskTimer(this, scp018::antiTunnelTick, 1L, 1L);
         Scp038Listener scp038 = new Scp038Listener(this);
         getServer().getPluginManager().registerEvents(scp038, this);
         getServer().getScheduler().runTaskTimer(this, scp038, 40L, 20L);

@@ -82,7 +82,7 @@ public final class LabMenu implements Listener {
             new G("battery", Material.COPPER_INGOT, "9V Battery"),
             new G("medkit", Material.BRICK, "Medkit"),
             new G("handcuffs", Material.CHAIN, "Handcuffs"),
-            new G("scp005", Material.TRIPWIRE_HOOK, "SCP-005 Skeleton Key"),
+            new G("scp005", Material.TRIAL_KEY, "SCP-005 Skeleton Key"),
             new G("quarter", Material.IRON_NUGGET, "Quarters"),
             new G("kit", Material.WRITABLE_BOOK, "Lab Starter Kit"),
             new G("rod", Material.CARROT_ON_A_STICK, "Stirring Rod"),

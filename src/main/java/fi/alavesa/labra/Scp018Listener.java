@@ -46,7 +46,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class Scp018Listener implements Listener {
 
     private static final double INITIAL_SPEED = 0.25;  // blocks per tick, first throw
-    private static final double MAX_SPEED = 3.0;       // blocks per tick, cap
+    private static final double MAX_SPEED = 2.5;       // blocks per tick, cap
     private static final long LIFETIME_MS = 180_000L;  // 3 minutes of bouncing
     private static final long RESTORE_MS = 300_000L;   // restore 5 minutes after damage
     private static final double SEEK_RANGE_SQ = 10.0 * 10.0;
@@ -67,6 +67,17 @@ public final class Scp018Listener implements Listener {
      * its expiry.
      */
     private final Map<Location, Restore> registry = new ConcurrentHashMap<>();
+
+    /**
+     * Anti-tunnel tracker: live ball egg UUID -> its location at the end of the
+     * previous tick. Every tick we ray-trace the segment it actually travelled
+     * since last tick; if that segment crossed a SOLID wall Minecraft's own
+     * collision skipped (which happens at high speed - the egg teleports past a
+     * one-block wall between ticks and no ProjectileHitEvent ever fires), we pull
+     * it back to the near side and reflect it. This GUARANTEES containment at any
+     * speed: the ball can never end a tick on the far side of a solid wall.
+     */
+    private final Map<java.util.UUID, Location> lastPos = new ConcurrentHashMap<>();
 
     private enum Kind { BROKEN, CRACKED }
 
@@ -104,6 +115,7 @@ public final class Scp018Listener implements Listener {
         if (dir.lengthSquared() > 1.0e-9) {
             egg.setVelocity(dir.normalize().multiply(INITIAL_SPEED));
         }
+        lastPos.put(egg.getUniqueId(), egg.getLocation());
     }
 
     /** The ball is not an egg. Nothing hatches. */
@@ -210,6 +222,55 @@ public final class Scp018Listener implements Listener {
             tag(spawned, bounces, born, finalSpeed);
         });
         next.setVelocity(send);
+        lastPos.remove(egg.getUniqueId());
+        lastPos.put(next.getUniqueId(), next.getLocation());
+    }
+
+    /**
+     * Runs EVERY tick. For each live ball, ray-trace the exact segment it moved
+     * this tick. If that ray meets a solid wall the egg has already passed
+     * (tunnelled), snap the egg back to the wall face and reflect its velocity -
+     * the ball physically cannot end up outside its box. Breakable glass/doors in
+     * the path are punched through here too, as a backstop for the hit event.
+     */
+    public void antiTunnelTick() {
+        if (lastPos.isEmpty()) return;
+        for (Iterator<Map.Entry<java.util.UUID, Location>> it = lastPos.entrySet().iterator(); it.hasNext();) {
+            Map.Entry<java.util.UUID, Location> e = it.next();
+            Entity ent = plugin.getServer().getEntity(e.getKey());
+            if (!(ent instanceof Egg egg) || !egg.isValid() || egg.isDead()) { it.remove(); continue; }
+            Location cur = egg.getLocation();
+            Location prev = e.getValue();
+            if (prev.getWorld() == null || !prev.getWorld().equals(cur.getWorld())) { e.setValue(cur); continue; }
+            Vector seg = cur.toVector().subtract(prev.toVector());
+            double dist = seg.length();
+            if (dist <= 0.05) { e.setValue(cur); continue; }
+            Vector dir = seg.clone().multiply(1.0 / dist);
+            org.bukkit.util.RayTraceResult hit = prev.getWorld().rayTraceBlocks(
+                prev, dir, dist + 0.3, org.bukkit.FluidCollisionMode.NEVER, true);
+            if (hit == null || hit.getHitBlock() == null) { e.setValue(cur); continue; }
+            Block b = hit.getHitBlock();
+            Material m = b.getType();
+            if (isBreakable(m)) {
+                breakThrough(b);            // backstop: window/door the hit event missed
+                e.setValue(cur);
+                continue;
+            }
+            if (!m.isSolid()) { e.setValue(cur); continue; }
+            // Tunnelled through a solid wall: reflect and put it back on the near side.
+            BlockFace face = hit.getHitBlockFace();
+            Vector normal = face != null ? face.getDirection() : dir.clone().multiply(-1);
+            Vector v = egg.getVelocity();
+            Vector reflected = v.clone().subtract(normal.clone().multiply(2 * v.dot(normal)));
+            if (reflected.lengthSquared() < 1.0e-9) reflected = normal.clone().multiply(v.length());
+            Location safe = hit.getHitPosition().toLocation(prev.getWorld())
+                .add(normal.clone().multiply(0.25));
+            safe.setDirection(reflected);
+            crackWall(b);
+            egg.teleport(safe);
+            egg.setVelocity(reflected);
+            e.setValue(safe);
+        }
     }
 
     // --- breakable / solid classification -------------------------------------
@@ -279,6 +340,7 @@ public final class Scp018Listener implements Listener {
             applyRestore(e.getKey(), e.getValue());
         }
         registry.clear();
+        lastPos.clear();
     }
 
     private void applyRestore(Location loc, Restore r) {
