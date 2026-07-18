@@ -51,7 +51,7 @@ public final class Scp018Listener implements Listener {
     private static final long RESTORE_MS = 300_000L;   // restore 5 minutes after damage
     private static final double SEEK_RANGE_SQ = 10.0 * 10.0;
     private static final double CRACK_RANGE = 24.0;    // who sees the crack overlay
-    private static final float CRACK_STAGE = 0.6f;
+    private static final float CRACK_STEP = 0.12f;  // crack deepens this much per repeat hit
 
     private final LabraPlugin plugin;
     private final NamespacedKey ballKey;
@@ -78,6 +78,11 @@ public final class Scp018Listener implements Listener {
      * speed: the ball can never end a tick on the far side of a solid wall.
      */
     private final Map<java.util.UUID, Location> lastPos = new ConcurrentHashMap<>();
+
+    /** How many times the ball has cracked each block. Repeat hits on the same
+     *  wall deepen the crack from a hairline toward nearly-shattered; cleared
+     *  when the wall heals so it starts fresh next time. */
+    private final Map<Location, Integer> crackLevel = new ConcurrentHashMap<>();
 
     private enum Kind { BROKEN, CRACKED }
 
@@ -110,6 +115,11 @@ public final class Scp018Listener implements Listener {
         if (egg.getPersistentDataContainer().has(ballKey, PersistentDataType.BYTE)) return; // a bounce respawn
         if (!isBallItem(egg.getItem())) return;
         tag(egg, 0, System.currentTimeMillis(), INITIAL_SPEED);
+        // No gravity, no drag-to-a-stop: the superball keeps its energy and only
+        // changes direction when it bounces. With gravity ON, falling between
+        // bounces skewed every reflection downward and horizontal bounces shrank
+        // even as the speed doubled - now each bounce is genuinely bigger.
+        egg.setGravity(false);
         // Start it crawling: override the throw impulse with our tiny initial speed.
         Vector dir = egg.getVelocity();
         if (dir.lengthSquared() > 1.0e-9) {
@@ -219,6 +229,7 @@ public final class Scp018Listener implements Listener {
         Egg next = at.getWorld().spawn(from, Egg.class, spawned -> {
             spawned.setItem(item);
             spawned.setShooter(shooter);
+            spawned.setGravity(false);   // straight-line superball; energy only grows
             tag(spawned, bounces, born, finalSpeed);
         });
         next.setVelocity(send);
@@ -257,12 +268,16 @@ public final class Scp018Listener implements Listener {
                 continue;
             }
             if (!m.isSolid()) { e.setValue(cur); continue; }
-            // Tunnelled through a solid wall: reflect and put it back on the near side.
+            // Tunnelled through a solid wall: reflect and put it back on the near side,
+            // keeping the ball's TAGGED speed so an anti-tunnel bounce never shrinks it.
             BlockFace face = hit.getHitBlockFace();
             Vector normal = face != null ? face.getDirection() : dir.clone().multiply(-1);
             Vector v = egg.getVelocity();
+            double speed = egg.getPersistentDataContainer()
+                .getOrDefault(speedKey, PersistentDataType.DOUBLE, v.length());
             Vector reflected = v.clone().subtract(normal.clone().multiply(2 * v.dot(normal)));
-            if (reflected.lengthSquared() < 1.0e-9) reflected = normal.clone().multiply(v.length());
+            if (reflected.lengthSquared() < 1.0e-9) reflected = normal.clone();
+            reflected = reflected.normalize().multiply(speed);
             Location safe = hit.getHitPosition().toLocation(prev.getWorld())
                 .add(normal.clone().multiply(0.25));
             safe.setDirection(reflected);
@@ -307,12 +322,18 @@ public final class Scp018Listener implements Listener {
      *  nearby players and register it for later clearing. */
     private void crackWall(Block block) {
         Location loc = block.getLocation();
+        // Each hit on the same wall deepens the crack: a hairline on the first
+        // strike, climbing toward nearly-shattered (never quite breaking) as the
+        // ball keeps battering the same spot.
+        int level = crackLevel.merge(loc, 1, Integer::sum);
+        float progress = (float) Math.min(0.95, 0.1 + (level - 1) * CRACK_STEP);
         for (Player p : block.getWorld().getPlayers()) {
             if (p.getLocation().distanceSquared(loc) <= CRACK_RANGE * CRACK_RANGE) {
-                p.sendBlockDamage(loc, CRACK_STAGE);
+                p.sendBlockDamage(loc, progress);
             }
         }
-        block.getWorld().playSound(loc, Sound.BLOCK_STONE_HIT, 0.8f, 0.9f);
+        float pitch = Math.max(0.5f, 0.9f - level * 0.05f); // a deeper crunch as it worsens
+        block.getWorld().playSound(loc, Sound.BLOCK_STONE_HIT, 0.8f, pitch);
         // A crack has no BlockData to restore; keep any existing BROKEN entry.
         registry.merge(loc, new Restore(Kind.CRACKED, null, System.currentTimeMillis() + RESTORE_MS),
             (existing, incoming) -> existing.kind() == Kind.BROKEN
@@ -341,6 +362,7 @@ public final class Scp018Listener implements Listener {
         }
         registry.clear();
         lastPos.clear();
+        crackLevel.clear();
     }
 
     private void applyRestore(Location loc, Restore r) {
@@ -356,5 +378,6 @@ public final class Scp018Listener implements Listener {
                 }
             }
         }
+        crackLevel.remove(loc);   // a healed wall starts fresh next time
     }
 }

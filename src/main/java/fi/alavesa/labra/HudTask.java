@@ -117,6 +117,11 @@ public final class HudTask implements Runnable {
         double temp = 37.0;
         temp += Math.min(4.0, score(player, "lab.z008") / 45.0);
         temp -= Math.min(7.0, score(player, "lab.inf") / 9.0);
+        // catching fire cooks you: the readout spikes hot while you burn and
+        // eases back down as the flames die (fire ticks tick away).
+        if (player.getFireTicks() > 0) {
+            temp += Math.min(8.0, player.getFireTicks() / 20.0);
+        }
         // a living body is never a flat line
         temp += 0.1 * Math.sin(player.getTicksLived() / 90.0);
         return temp;
