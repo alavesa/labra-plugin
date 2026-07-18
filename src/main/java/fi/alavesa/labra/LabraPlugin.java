@@ -51,7 +51,7 @@ public final class LabraPlugin extends JavaPlugin {
         scp018 = new Scp018Listener(this);
         getServer().getPluginManager().registerEvents(scp018, this);
         getServer().getScheduler().runTaskTimer(this, scp018::restoreTick, 100L, 100L);
-        getServer().getScheduler().runTaskTimer(this, scp018::antiTunnelTick, 1L, 1L);
+        getServer().getScheduler().runTaskTimer(this, scp018::ballTick, 1L, 1L);
         Scp038Listener scp038 = new Scp038Listener(this);
         getServer().getPluginManager().registerEvents(scp038, this);
         getServer().getScheduler().runTaskTimer(this, scp038, 40L, 20L);

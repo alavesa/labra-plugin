@@ -1,10 +1,12 @@
 package fi.alavesa.labra;
 
+import org.bukkit.FluidCollisionMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
+import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.data.BlockData;
@@ -19,74 +21,77 @@ import org.bukkit.event.entity.ProjectileLaunchEvent;
 import org.bukkit.event.player.PlayerEggThrowEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.persistence.PersistentDataType;
-import org.bukkit.projectiles.ProjectileSource;
+import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
 
 import java.util.Iterator;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * SCP-018, the Super Ball. Thrown, it starts almost lazily and does not stop:
- * every impact DOUBLES its speed (from ~0.25 up to ~3.0 blocks/tick), so the
- * first bounces crawl and give the thrower time to run before it accelerates
- * into chaos. It reflects off surfaces (scatter + player-seek), punches CLEAN
- * THROUGH glass, panes, doors and trapdoors (breaking them), and CRACKS solid
- * walls it can't break with a non-destructive vanilla crack overlay. Everything
- * it breaks or cracks is restored after five minutes (or immediately on plugin
- * shutdown). It bounces for three minutes, then despawns, leaving nothing.
+ * SCP-018, the Super Ball. Thrown, it starts as a light hop and does not stop:
+ * every bounce off a surface multiplies its speed by sqrt(2), and since bounce
+ * HEIGHT scales with speed squared, each bounce is twice as high as the last -
+ * a gentle first hop that escalates into chaos over ~9 bounces before the cap.
  *
- * Black stained glass (block and pane) is a deliberate wall material on this
- * server: it is treated as solid - it cracks, it never breaks.
+ * It only smashes through glass, panes, doors and trapdoors once it has built
+ * up enough energy ({@link #BREAK_MIN_SPEED}); a slow ball just bounces off
+ * them. Solid walls it can't break get a progressively deepening, non-
+ * destructive crack overlay. Everything it breaks or cracks is restored after
+ * five minutes (or immediately on plugin shutdown). Black stained glass is a
+ * deliberate wall on this server: it cracks, it never breaks.
  *
- * Implementation: the thrown egg is consumed on every hit, so each bounce
- * removes the old projectile and launches a fresh tagged egg with the new
- * velocity. Tagged eggs never hatch chickens.
+ * Implementation: a single egg per ball, driven entirely by {@link #ballTick}
+ * (gravity, swept ray-cast collision, reflection, escalation and breaking all
+ * in one place). We turn OFF the egg's own gravity and never rely on
+ * ProjectileHitEvent for the bounce - a per-tick ray-cast from the ball's
+ * position along its velocity catches every wall at any speed, so it can never
+ * tunnel out of its box. Tagged eggs never hatch.
  */
 public final class Scp018Listener implements Listener {
 
-    private static final double INITIAL_SPEED = 0.22;  // blocks per tick, first (light) hop
-    private static final double MAX_SPEED = 4.0;       // blocks per tick, cap
-    /** Speed multiplier per surface bounce. Bounce HEIGHT scales with speed^2,
-     *  so x sqrt(2) per bounce DOUBLES the height each time - a light hop that
-     *  escalates over ~9 bounces before the cap. */
+    private static final double INITIAL_SPEED = 0.22;  // blocks/tick, first light hop
+    private static final double MAX_SPEED = 4.0;        // blocks/tick, cap
+    /** Speed multiplier per bounce. Height ~ speed^2, so x sqrt(2) DOUBLES the
+     *  bounce height each time. */
     private static final double BOUNCE_GROWTH = 1.41421356;
+    /** Gravity applied to the ball each tick (blocks/tick^2). */
+    private static final double GRAVITY = 0.08;
+    /** Below this speed the ball just bounces off glass/doors; at or above it,
+     *  it smashes through. So a slow ball can't break windows - only a fast one. */
+    private static final double BREAK_MIN_SPEED = 0.85;
     private static final long LIFETIME_MS = 180_000L;  // 3 minutes of bouncing
     private static final long RESTORE_MS = 300_000L;   // restore 5 minutes after damage
-    private static final double SEEK_RANGE_SQ = 10.0 * 10.0;
     private static final double CRACK_RANGE = 24.0;    // who sees the crack overlay
-    private static final float CRACK_STEP = 0.12f;  // crack deepens this much per repeat hit
+    private static final float CRACK_STEP = 0.12f;     // crack deepens this much per repeat hit
 
     private final LabraPlugin plugin;
     private final NamespacedKey ballKey;
-    private final NamespacedKey bounceKey;
-    private final NamespacedKey bornKey;
-    private final NamespacedKey speedKey;
 
-    /**
-     * Restore registry: block location -> pending restore. BROKEN entries carry
-     * the original BlockData (put back if the spot is still AIR); CRACKED
-     * entries just clear the crack overlay for nearby players. A single map keyed
-     * by location keeps at most one entry per block; re-hitting a block refreshes
-     * its expiry.
-     */
+    /** Live balls: egg UUID -> its authoritative motion state. */
+    private final Map<UUID, Ball> balls = new ConcurrentHashMap<>();
+
+    /** Restore registry: block location -> pending restore (broken block data to
+     *  put back, or a crack overlay to clear). */
     private final Map<Location, Restore> registry = new ConcurrentHashMap<>();
 
-    /**
-     * Anti-tunnel tracker: live ball egg UUID -> its location at the end of the
-     * previous tick. Every tick we ray-trace the segment it actually travelled
-     * since last tick; if that segment crossed a SOLID wall Minecraft's own
-     * collision skipped (which happens at high speed - the egg teleports past a
-     * one-block wall between ticks and no ProjectileHitEvent ever fires), we pull
-     * it back to the near side and reflect it. This GUARANTEES containment at any
-     * speed: the ball can never end a tick on the far side of a solid wall.
-     */
-    private final Map<java.util.UUID, Location> lastPos = new ConcurrentHashMap<>();
-
-    /** How many times the ball has cracked each block. Repeat hits on the same
-     *  wall deepen the crack from a hairline toward nearly-shattered; cleared
-     *  when the wall heals so it starts fresh next time. */
+    /** How many times the ball has cracked each block, so repeat hits deepen the
+     *  crack; cleared when the wall heals. */
     private final Map<Location, Integer> crackLevel = new ConcurrentHashMap<>();
+
+    /** One ball's state. We own the velocity (the egg's own physics is off), so
+     *  drag/gravity can never quietly bleed away the escalating speed. */
+    private static final class Ball {
+        Vector vel;           // blocks/tick, authoritative
+        double bounceSpeed;   // the launch speed of the last bounce (escalates)
+        final long bornMs;
+        int damageCd;         // ticks until it can strike an entity again
+        Ball(Vector vel, double bounceSpeed, long bornMs) {
+            this.vel = vel; this.bounceSpeed = bounceSpeed; this.bornMs = bornMs;
+        }
+    }
 
     private enum Kind { BROKEN, CRACKED }
 
@@ -95,9 +100,6 @@ public final class Scp018Listener implements Listener {
     public Scp018Listener(LabraPlugin plugin) {
         this.plugin = plugin;
         this.ballKey = new NamespacedKey(plugin, "scp018");
-        this.bounceKey = new NamespacedKey(plugin, "scp018_bounces");
-        this.bornKey = new NamespacedKey(plugin, "scp018_born");
-        this.speedKey = new NamespacedKey(plugin, "scp018_speed");
     }
 
     private boolean isBallItem(ItemStack item) {
@@ -105,32 +107,22 @@ public final class Scp018Listener implements Listener {
         return item.getItemMeta().getCustomModelDataComponent().getStrings().contains("scp018");
     }
 
-    private void tag(Egg egg, int bounces, long born, double speed) {
-        var pdc = egg.getPersistentDataContainer();
-        pdc.set(ballKey, PersistentDataType.BYTE, (byte) 1);
-        pdc.set(bounceKey, PersistentDataType.INTEGER, bounces);
-        pdc.set(bornKey, PersistentDataType.LONG, born);
-        pdc.set(speedKey, PersistentDataType.DOUBLE, speed);
-    }
-
     @EventHandler
     public void onLaunch(ProjectileLaunchEvent event) {
         if (!(event.getEntity() instanceof Egg egg)) return;
-        if (egg.getPersistentDataContainer().has(ballKey, PersistentDataType.BYTE)) return; // a bounce respawn
+        if (balls.containsKey(egg.getUniqueId())) return;
         if (!isBallItem(egg.getItem())) return;
-        tag(egg, 0, System.currentTimeMillis(), INITIAL_SPEED);
-        // Gravity STAYS ON: 018 is a superball that arcs and bounces off the
-        // floor, and each surface bounce multiplies its speed so the bounce
-        // HEIGHT doubles - it starts as a light hop and escalates into chaos.
-        // Start it crawling: override the throw impulse with our tiny initial speed.
+        egg.getPersistentDataContainer().set(ballKey, PersistentDataType.BYTE, (byte) 1);
+        // We drive it ourselves: no Minecraft gravity/drag on the egg.
+        egg.setGravity(false);
         Vector dir = egg.getVelocity();
-        if (dir.lengthSquared() > 1.0e-9) {
-            egg.setVelocity(dir.normalize().multiply(INITIAL_SPEED));
-        }
-        lastPos.put(egg.getUniqueId(), egg.getLocation());
+        Vector v = (dir.lengthSquared() > 1.0e-9 ? dir.clone().normalize()
+            : new Vector(0, -1, 0)).multiply(INITIAL_SPEED);
+        egg.setVelocity(v);
+        balls.put(egg.getUniqueId(), new Ball(v, INITIAL_SPEED, System.currentTimeMillis()));
     }
 
-    /** The ball is not an egg. Nothing hatches. */
+    /** The ball's egg never hatches and never breaks via vanilla collision. */
     @EventHandler
     public void onHatch(PlayerEggThrowEvent event) {
         if (event.getEgg().getPersistentDataContainer().has(ballKey, PersistentDataType.BYTE)) {
@@ -140,161 +132,99 @@ public final class Scp018Listener implements Listener {
 
     @EventHandler
     public void onHit(ProjectileHitEvent event) {
-        if (!(event.getEntity() instanceof Egg egg)) return;
-        var pdc = egg.getPersistentDataContainer();
-        if (!pdc.has(ballKey, PersistentDataType.BYTE)) return;
-        event.setCancelled(true); // no break, no hatch - we do the bouncing
-
-        Vector velocity = egg.getVelocity();
-        Location at = egg.getLocation();
-        ItemStack item = egg.getItem();
-        ProjectileSource shooter = egg.getShooter();
-        int bounces = pdc.getOrDefault(bounceKey, PersistentDataType.INTEGER, 0) + 1;
-        long born = pdc.getOrDefault(bornKey, PersistentDataType.LONG, System.currentTimeMillis());
-        double prevSpeed = pdc.getOrDefault(speedKey, PersistentDataType.DOUBLE, INITIAL_SPEED);
-        egg.remove();
-
-        // the impact: a sharp click and a bruise, both scaled with speed
-        double impactSpeed = velocity.length();
-        at.getWorld().playSound(at, Sound.BLOCK_NOTE_BLOCK_HAT,
-            (float) Math.min(1.0, 0.3 + impactSpeed * 0.3), 1.8f);
-        for (Entity near : at.getWorld().getNearbyEntities(at, 1.2, 1.2, 1.2)) {
-            if (near instanceof LivingEntity living) {
-                if (shooter instanceof LivingEntity source) living.damage(impactSpeed * 5, source);
-                else living.damage(impactSpeed * 5);
-            }
+        // We handle collisions in ballTick; keep vanilla from removing the egg.
+        if (event.getEntity() instanceof Egg egg
+            && egg.getPersistentDataContainer().has(ballKey, PersistentDataType.BYTE)) {
+            event.setCancelled(true);
         }
-
-        // spent: three minutes of terror, then nothing at all
-        if (System.currentTimeMillis() - born > LIFETIME_MS) return;
-
-        // Each bounce grows the speed so the bounce HEIGHT doubles, up to the cap.
-        double nextSpeed = Math.min(MAX_SPEED, prevSpeed * BOUNCE_GROWTH);
-
-        // What did we hit? A block we can break, a wall we crack, or a body.
-        Block hitBlock = event.getHitBlock();
-        BlockFace face = event.getHitBlockFace();
-        boolean passThrough = false;
-
-        if (hitBlock != null) {
-            Material mat = hitBlock.getType();
-            if (isBreakable(mat)) {
-                breakThrough(hitBlock);
-                passThrough = true; // punch straight through, no reflection
-            } else if (hitBlock.getType().isSolid()) {
-                crackWall(hitBlock);
-            }
-        }
-
-        Vector direction;
-        if (passThrough) {
-            // Through the now-broken block: keep the same heading, just faster.
-            direction = velocity.clone().normalize();
-        } else {
-            Vector normal = face != null ? face.getDirection() : null;
-            Vector reflected;
-            if (normal != null && normal.lengthSquared() > 1.0e-9) {
-                reflected = velocity.clone().subtract(normal.clone().multiply(2 * velocity.dot(normal)));
-            } else {
-                reflected = velocity.clone().multiply(-1); // off a body: straight back
-            }
-            if (reflected.lengthSquared() < 1.0e-9) return; // dead stop - the ball rests
-            direction = reflected.normalize();
-
-            var rng = java.util.concurrent.ThreadLocalRandom.current();
-            if (rng.nextDouble() < 0.30) {
-                // seek: a third of the bounces turn toward the nearest player
-                Player mark = null;
-                double best = SEEK_RANGE_SQ;
-                for (Player p : at.getWorld().getPlayers()) {
-                    double d = p.getLocation().distanceSquared(at);
-                    if (d < best) { best = d; mark = p; }
-                }
-                if (mark != null) {
-                    direction = mark.getEyeLocation().toVector().subtract(at.toVector()).normalize();
-                }
-            } else {
-                // scatter: a LIGHT jitter so it never bounces the same way twice,
-                // with a slight upward bias so the reflection keeps its bounce
-                // height (a big downward scatter used to flatten the bounces).
-                direction.add(new Vector(rng.nextDouble(-0.25, 0.25),
-                    rng.nextDouble(-0.05, 0.25), rng.nextDouble(-0.25, 0.25)));
-                if (direction.lengthSquared() < 1.0e-9) return;
-                direction.normalize();
-            }
-        }
-
-        Vector send = direction.clone().multiply(nextSpeed);
-
-        // Nudge the spawn slightly along the travel direction so the fresh egg
-        // doesn't immediately re-collide with the same face / broken hole edge.
-        Location from = at.clone().add(direction.clone().multiply(0.15));
-        double finalSpeed = nextSpeed;
-        Egg next = at.getWorld().spawn(from, Egg.class, spawned -> {
-            spawned.setItem(item);
-            spawned.setShooter(shooter);
-            tag(spawned, bounces, born, finalSpeed);   // gravity ON - it arcs + bounces
-        });
-        next.setVelocity(send);
-        lastPos.remove(egg.getUniqueId());
-        lastPos.put(next.getUniqueId(), next.getLocation());
     }
 
     /**
-     * Runs EVERY tick. For each live ball, ray-trace the exact segment it moved
-     * this tick. If that ray meets a solid wall the egg has already passed
-     * (tunnelled), snap the egg back to the wall face and reflect its velocity -
-     * the ball physically cannot end up outside its box. Breakable glass/doors in
-     * the path are punched through here too, as a backstop for the hit event.
+     * The whole simulation, once per tick. For each ball: apply gravity, strike
+     * any entity it's touching, then swept-ray-cast along its velocity. A hit on
+     * breakable glass/door at speed smashes through; anything else is a BOUNCE -
+     * reflect off the face, multiply the speed (bounce height doubles), crack a
+     * solid wall, and reposition just shy of the surface so it never enters it.
      */
-    public void antiTunnelTick() {
-        if (lastPos.isEmpty()) return;
-        for (Iterator<Map.Entry<java.util.UUID, Location>> it = lastPos.entrySet().iterator(); it.hasNext();) {
-            Map.Entry<java.util.UUID, Location> e = it.next();
+    public void ballTick() {
+        if (balls.isEmpty()) return;
+        long now = System.currentTimeMillis();
+        for (Iterator<Map.Entry<UUID, Ball>> it = balls.entrySet().iterator(); it.hasNext(); ) {
+            Map.Entry<UUID, Ball> e = it.next();
             Entity ent = plugin.getServer().getEntity(e.getKey());
-            if (!(ent instanceof Egg egg) || !egg.isValid() || egg.isDead()) { it.remove(); continue; }
-            Location cur = egg.getLocation();
-            Location prev = e.getValue();
-            if (prev.getWorld() == null || !prev.getWorld().equals(cur.getWorld())) { e.setValue(cur); continue; }
-            Vector seg = cur.toVector().subtract(prev.toVector());
-            double dist = seg.length();
-            if (dist <= 0.05) { e.setValue(cur); continue; }
-            Vector dir = seg.clone().multiply(1.0 / dist);
-            org.bukkit.util.RayTraceResult hit = prev.getWorld().rayTraceBlocks(
-                prev, dir, dist + 0.3, org.bukkit.FluidCollisionMode.NEVER, true);
-            if (hit == null || hit.getHitBlock() == null) { e.setValue(cur); continue; }
-            Block b = hit.getHitBlock();
-            Material m = b.getType();
-            if (isBreakable(m)) {
-                breakThrough(b);            // backstop: window/door the hit event missed
-                e.setValue(cur);
-                continue;
+            if (!(ent instanceof Egg egg) || egg.isDead() || !egg.isValid()) { it.remove(); continue; }
+            Ball ball = e.getValue();
+            if (now - ball.bornMs > LIFETIME_MS) { egg.remove(); it.remove(); continue; }
+
+            World world = egg.getWorld();
+            Location pos = egg.getLocation();
+
+            // gravity, then clamp the total speed so a long fall can't run away
+            ball.vel.setY(ball.vel.getY() - GRAVITY);
+            double speed = ball.vel.length();
+            if (speed > MAX_SPEED) { ball.vel.multiply(MAX_SPEED / speed); speed = MAX_SPEED; }
+
+            // strike a body it's touching (with a short cooldown so it doesn't
+            // shred in a single tick) - and bounce off it, escalating.
+            if (ball.damageCd > 0) ball.damageCd--;
+            if (ball.damageCd == 0) {
+                for (Entity near : world.getNearbyEntities(pos, 0.7, 0.7, 0.7)) {
+                    if (!(near instanceof LivingEntity living)) continue;
+                    if (near.equals(egg.getShooter())) continue;
+                    double dmg = Math.max(2.0, ball.bounceSpeed * 6.0);
+                    if (egg.getShooter() instanceof LivingEntity src) living.damage(dmg, src);
+                    else living.damage(dmg);
+                    Vector away = pos.toVector().subtract(living.getLocation().toVector());
+                    if (away.lengthSquared() < 1.0e-6) away = new Vector(0, 1, 0);
+                    away.setY(Math.abs(away.getY()) + 0.3);
+                    ball.bounceSpeed = Math.min(MAX_SPEED, ball.bounceSpeed * BOUNCE_GROWTH);
+                    ball.vel = away.normalize().multiply(ball.bounceSpeed);
+                    world.playSound(pos, Sound.BLOCK_NOTE_BLOCK_HAT, 1f, 1.6f);
+                    ball.damageCd = 8;
+                    break;
+                }
             }
-            if (!m.isSolid()) { e.setValue(cur); continue; }
-            // Tunnelled through a solid wall: reflect and put it back on the near side,
-            // keeping the ball's TAGGED speed so an anti-tunnel bounce never shrinks it.
-            BlockFace face = hit.getHitBlockFace();
-            Vector normal = face != null ? face.getDirection() : dir.clone().multiply(-1);
-            Vector v = egg.getVelocity();
-            double speed = egg.getPersistentDataContainer()
-                .getOrDefault(speedKey, PersistentDataType.DOUBLE, v.length());
-            Vector reflected = v.clone().subtract(normal.clone().multiply(2 * v.dot(normal)));
-            if (reflected.lengthSquared() < 1.0e-9) reflected = normal.clone();
-            reflected = reflected.normalize().multiply(speed);
-            Location safe = hit.getHitPosition().toLocation(prev.getWorld())
-                .add(normal.clone().multiply(0.25));
-            safe.setDirection(reflected);
-            crackWall(b);
-            egg.teleport(safe);
-            egg.setVelocity(reflected);
-            e.setValue(safe);
+
+            speed = ball.vel.length();
+            if (speed > 1.0e-4) {
+                Vector dir = ball.vel.clone().multiply(1.0 / speed);
+                RayTraceResult hit = world.rayTraceBlocks(pos, dir, speed + 0.25,
+                    FluidCollisionMode.NEVER, true);
+                if (hit != null && hit.getHitBlock() != null) {
+                    Block b = hit.getHitBlock();
+                    Material m = b.getType();
+                    BlockFace face = hit.getHitBlockFace();
+                    if (isBreakable(m) && ball.bounceSpeed >= BREAK_MIN_SPEED) {
+                        breakThrough(b);   // enough energy: smash through, keep going
+                    } else {
+                        // BOUNCE. Crack real walls; a slow ball just tinks off glass.
+                        if (!isBreakable(m)) crackWall(b);
+                        else world.playSound(b.getLocation(), Sound.BLOCK_GLASS_HIT, 0.5f, 1.4f);
+                        Vector normal = face != null ? face.getDirection() : dir.clone().multiply(-1);
+                        Vector reflected = dir.clone().subtract(
+                            normal.clone().multiply(2 * dir.dot(normal)));
+                        ThreadLocalRandom rng = ThreadLocalRandom.current();
+                        reflected.add(new Vector(rng.nextDouble(-0.12, 0.12),
+                            rng.nextDouble(-0.03, 0.12), rng.nextDouble(-0.12, 0.12)));
+                        if (reflected.lengthSquared() < 1.0e-9) reflected = normal.clone();
+                        ball.bounceSpeed = Math.min(MAX_SPEED, ball.bounceSpeed * BOUNCE_GROWTH);
+                        ball.vel = reflected.normalize().multiply(ball.bounceSpeed);
+                        Location safe = hit.getHitPosition().toLocation(world)
+                            .add(normal.clone().multiply(0.15));
+                        egg.teleport(safe);
+                        world.playSound(safe, Sound.BLOCK_NOTE_BLOCK_HAT,
+                            (float) Math.min(1.0, 0.3 + ball.bounceSpeed * 0.3), 1.8f);
+                    }
+                }
+            }
+            egg.setVelocity(ball.vel);   // Minecraft moves it smoothly along our velocity
         }
     }
 
     // --- breakable / solid classification -------------------------------------
 
-    /** Glass, glass panes, doors and trapdoors the ball punches through - EXCEPT
-     *  black stained glass and its pane, which are deliberate walls (solid). */
+    /** Glass, glass panes, doors and trapdoors the ball can punch through -
+     *  EXCEPT black stained glass and its pane, deliberate walls (solid). */
     private static boolean isBreakable(Material mat) {
         String name = mat.name();
         if (name.equals("BLACK_STAINED_GLASS") || name.equals("BLACK_STAINED_GLASS_PANE")) {
@@ -321,13 +251,10 @@ public final class Scp018Listener implements Listener {
         registry.put(loc, new Restore(Kind.BROKEN, original, System.currentTimeMillis() + RESTORE_MS));
     }
 
-    /** Crack (don't break) a solid wall: show the vanilla crack overlay to
-     *  nearby players and register it for later clearing. */
+    /** Crack (don't break) a solid wall: a hairline on the first hit, deepening
+     *  toward nearly-shattered with each repeat strike on the same block. */
     private void crackWall(Block block) {
         Location loc = block.getLocation();
-        // Each hit on the same wall deepens the crack: a hairline on the first
-        // strike, climbing toward nearly-shattered (never quite breaking) as the
-        // ball keeps battering the same spot.
         int level = crackLevel.merge(loc, 1, Integer::sum);
         float progress = (float) Math.min(0.95, 0.1 + (level - 1) * CRACK_STEP);
         for (Player p : block.getWorld().getPlayers()) {
@@ -335,19 +262,16 @@ public final class Scp018Listener implements Listener {
                 p.sendBlockDamage(loc, progress);
             }
         }
-        float pitch = Math.max(0.5f, 0.9f - level * 0.05f); // a deeper crunch as it worsens
+        float pitch = Math.max(0.5f, 0.9f - level * 0.05f);
         block.getWorld().playSound(loc, Sound.BLOCK_STONE_HIT, 0.8f, pitch);
-        // A crack has no BlockData to restore; keep any existing BROKEN entry.
         registry.merge(loc, new Restore(Kind.CRACKED, null, System.currentTimeMillis() + RESTORE_MS),
             (existing, incoming) -> existing.kind() == Kind.BROKEN
                 ? new Restore(Kind.BROKEN, existing.original(), incoming.expireEpochMs())
                 : incoming);
     }
 
-    /**
-     * Repeating restore sweep (wire in onEnable via runTaskTimer). Puts back
-     * broken blocks whose spot is still air and clears expired crack overlays.
-     */
+    /** Repeating restore sweep: put back broken blocks (if still air) and clear
+     *  expired crack overlays. */
     public void restoreTick() {
         long now = System.currentTimeMillis();
         for (Iterator<Map.Entry<Location, Restore>> it = registry.entrySet().iterator(); it.hasNext(); ) {
@@ -364,7 +288,7 @@ public final class Scp018Listener implements Listener {
             applyRestore(e.getKey(), e.getValue());
         }
         registry.clear();
-        lastPos.clear();
+        balls.clear();
         crackLevel.clear();
     }
 
