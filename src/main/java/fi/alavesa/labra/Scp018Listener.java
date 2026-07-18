@@ -90,6 +90,7 @@ public final class Scp018Listener implements Listener {
         final long bornMs;
         final UUID shooterId; // for damage attribution (nullable)
         int damageCd;         // ticks until it can strike an entity again
+        Location lastSafe;    // last position that was in open air (un-stick fallback)
         Ball(Vector vel, double bounceSpeed, long bornMs, UUID shooterId) {
             this.vel = vel; this.bounceSpeed = bounceSpeed;
             this.bornMs = bornMs; this.shooterId = shooterId;
@@ -157,15 +158,21 @@ public final class Scp018Listener implements Listener {
             Location pos = disp.getLocation();
 
             // Un-stick: if it ever ends a tick inside a solid, non-breakable
-            // block, eject it upward so it can never grind in place forever.
+            // block, fall back to the last open-air spot and reverse course -
+            // NEVER eject upward (that punched it through ceiling fixtures and
+            // out of the room). Then it keeps bouncing inside its box.
             Material hereMat = pos.getBlock().getType();
             if (hereMat.isSolid() && !isBreakable(hereMat)) {
-                ThreadLocalRandom r = ThreadLocalRandom.current();
-                ball.vel = new Vector(r.nextDouble(-0.3, 0.3), 1.0, r.nextDouble(-0.3, 0.3))
-                    .normalize().multiply(Math.max(ball.bounceSpeed, INITIAL_SPEED));
-                disp.teleport(pos.clone().add(0, 1.0, 0));
+                Location back = ball.lastSafe != null ? ball.lastSafe.clone()
+                    : pos.clone().add(0, -1.0, 0);
+                ball.vel = ball.vel.clone().multiply(-1);
+                if (ball.vel.lengthSquared() < 1.0e-9) {
+                    ball.vel = new Vector(0, -1, 0).multiply(Math.max(ball.bounceSpeed, INITIAL_SPEED));
+                }
+                disp.teleport(back);
                 continue;
             }
+            ball.lastSafe = pos.clone();   // this position is open air - remember it
 
             ball.vel.setY(ball.vel.getY() - GRAVITY);
             double speed = ball.vel.length();
@@ -245,6 +252,9 @@ public final class Scp018Listener implements Listener {
         if (name.equals("BLACK_STAINED_GLASS") || name.equals("BLACK_STAINED_GLASS_PANE")) {
             return false;
         }
+        // Copper trapdoors are STRUCTURAL on this server (ceiling light fixtures,
+        // walls) - the ball must bounce off them, never smash through and escape.
+        if (name.contains("COPPER_TRAPDOOR")) return false;
         if (name.endsWith("_GLASS_PANE") || name.equals("GLASS_PANE")) return true;
         if (name.endsWith("_GLASS") || name.equals("GLASS") || name.equals("TINTED_GLASS")) return true;
         if (name.endsWith("_DOOR") || name.endsWith("_TRAPDOOR")) return true; // incl. IRON_DOOR
