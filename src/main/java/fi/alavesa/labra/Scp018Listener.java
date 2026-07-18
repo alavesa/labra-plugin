@@ -1,6 +1,7 @@
 package fi.alavesa.labra;
 
 import org.bukkit.FluidCollisionMode;
+import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
@@ -51,11 +52,18 @@ import java.util.concurrent.ThreadLocalRandom;
  */
 public final class Scp018Listener implements Listener {
 
-    private static final double INITIAL_SPEED = 0.40;  // blocks/tick, first light hop
+    private static final double INITIAL_SPEED = 0.25;  // blocks/tick, first slow hop
     /** After a bounce, at least this fraction of the speed must point AWAY from
      *  the wall, so the ball always clears the surface instead of micro-bouncing
      *  in place / grinding into a corner. */
     private static final double MIN_OUTWARD = 0.55;
+    /** Player-seeking. On a bounce there's a SEEK_CHANCE it aims at the nearest
+     *  player instead of reflecting; a rarer LOCKON_CHANCE starts a homing run
+     *  where it flies straight at the player for HOMING_TICKS - a guaranteed hit. */
+    private static final double SEEK_RANGE = 22.0;
+    private static final double SEEK_CHANCE = 0.30;
+    private static final double LOCKON_CHANCE = 0.10;
+    private static final int HOMING_TICKS = 100;   // 5s guaranteed pursuit
     private static final double MAX_SPEED = 4.0;        // blocks/tick, cap
     /** Speed multiplier per bounce. Height ~ speed^2, so x sqrt(2) DOUBLES the
      *  bounce height each time. */
@@ -90,6 +98,7 @@ public final class Scp018Listener implements Listener {
         final long bornMs;
         final UUID shooterId; // for damage attribution (nullable)
         int damageCd;         // ticks until it can strike an entity again
+        int homingTicks;      // >0 = flying straight at a player (guaranteed hit)
         Location lastSafe;    // last position that was in open air (un-stick fallback)
         Ball(Vector vel, double bounceSpeed, long bornMs, UUID shooterId) {
             this.vel = vel; this.bounceSpeed = bounceSpeed;
@@ -174,17 +183,33 @@ public final class Scp018Listener implements Listener {
             }
             ball.lastSafe = pos.clone();   // this position is open air - remember it
 
-            ball.vel.setY(ball.vel.getY() - GRAVITY);
+            // Homing lock-on: fly straight at the nearest player - a guaranteed
+            // hit. While homing we skip gravity so the pursuit is a clean line.
+            if (ball.homingTicks > 0) {
+                ball.homingTicks--;
+                Player mark = nearestPlayer(pos, SEEK_RANGE);
+                if (mark != null) {
+                    Vector to = mark.getEyeLocation().toVector().subtract(pos.toVector());
+                    if (to.lengthSquared() > 1.0e-6) ball.vel = to.normalize().multiply(ball.bounceSpeed);
+                } else {
+                    ball.homingTicks = 0;   // nobody to chase
+                }
+            } else {
+                ball.vel.setY(ball.vel.getY() - GRAVITY);
+            }
             double speed = ball.vel.length();
             if (speed > MAX_SPEED) { ball.vel.multiply(MAX_SPEED / speed); }
 
             // strike a body it's touching (short cooldown so it doesn't shred),
-            // and bounce off it, escalating.
+            // and bounce off it, escalating. The THROWER is immune only for the
+            // first 1.5s (so it doesn't hit them at their feet on the throw) -
+            // after that it hits everyone, including whoever threw it.
             if (ball.damageCd > 0) ball.damageCd--;
             if (ball.damageCd == 0) {
-                for (Entity near : world.getNearbyEntities(pos, 0.7, 0.7, 0.7)) {
+                boolean grace = now - ball.bornMs < 1500L;
+                for (Entity near : world.getNearbyEntities(pos, 1.0, 1.0, 1.0)) {
                     if (!(near instanceof LivingEntity living)) continue;
-                    if (near.getUniqueId().equals(ball.shooterId)) continue;
+                    if (grace && near.getUniqueId().equals(ball.shooterId)) continue;
                     double dmg = Math.max(2.0, ball.bounceSpeed * 6.0);
                     LivingEntity src = ball.shooterId != null
                         && plugin.getServer().getEntity(ball.shooterId) instanceof LivingEntity le ? le : null;
@@ -194,8 +219,9 @@ public final class Scp018Listener implements Listener {
                     away.setY(Math.abs(away.getY()) + 0.3);
                     ball.bounceSpeed = Math.min(MAX_SPEED, ball.bounceSpeed * BOUNCE_GROWTH);
                     ball.vel = away.normalize().multiply(ball.bounceSpeed);
+                    ball.homingTicks = 0;   // lock-on satisfied
                     world.playSound(pos, Sound.BLOCK_NOTE_BLOCK_HAT, 1f, 1.6f);
-                    ball.damageCd = 8;
+                    ball.damageCd = 10;
                     break;
                 }
             }
@@ -215,21 +241,33 @@ public final class Scp018Listener implements Listener {
                     } else {
                         if (!isBreakable(m)) crackWall(b);
                         else world.playSound(b.getLocation(), Sound.BLOCK_GLASS_HIT, 0.5f, 1.4f);
-                        Vector normal = face != null ? face.getDirection() : dir.clone().multiply(-1);
-                        Vector reflected = dir.clone().subtract(
-                            normal.clone().multiply(2 * dir.dot(normal)));
                         ThreadLocalRandom rng = ThreadLocalRandom.current();
-                        reflected.add(new Vector(rng.nextDouble(-0.15, 0.15),
-                            rng.nextDouble(-0.1, 0.15), rng.nextDouble(-0.15, 0.15)));
-                        // GUARANTEE it leaves the surface: force a strong outward
-                        // (along-normal) component so it can't graze/stick/corner-grind.
-                        double along = reflected.dot(normal);
-                        if (along < MIN_OUTWARD) {
-                            reflected.add(normal.clone().multiply(MIN_OUTWARD - along));
-                        }
-                        if (reflected.lengthSquared() < 1.0e-9) reflected = normal.clone();
+                        Vector normal = face != null ? face.getDirection() : dir.clone().multiply(-1);
                         ball.bounceSpeed = Math.min(MAX_SPEED, ball.bounceSpeed * BOUNCE_GROWTH);
-                        ball.vel = reflected.normalize().multiply(ball.bounceSpeed);
+
+                        // rare: start a homing lock-on off this bounce (guaranteed chase)
+                        if (ball.homingTicks == 0 && rng.nextDouble() < LOCKON_CHANCE
+                            && nearestPlayer(pos, SEEK_RANGE) != null) {
+                            ball.homingTicks = HOMING_TICKS;
+                        }
+                        // more often: aim this single bounce at the nearest player
+                        Player mark = rng.nextDouble() < SEEK_CHANCE ? nearestPlayer(pos, SEEK_RANGE) : null;
+                        Vector out;
+                        if (mark != null) {
+                            out = mark.getEyeLocation().toVector().subtract(pos.toVector());
+                            if (out.lengthSquared() < 1.0e-9) out = normal.clone();
+                            out.normalize();
+                            double along = out.dot(normal);       // still leave the wall
+                            if (along < 0.2) out.add(normal.clone().multiply(0.2 - along));
+                        } else {
+                            out = dir.clone().subtract(normal.clone().multiply(2 * dir.dot(normal)));
+                            out.add(new Vector(rng.nextDouble(-0.15, 0.15),
+                                rng.nextDouble(-0.1, 0.15), rng.nextDouble(-0.15, 0.15)));
+                            double along = out.dot(normal);       // guarantee it clears the surface
+                            if (along < MIN_OUTWARD) out.add(normal.clone().multiply(MIN_OUTWARD - along));
+                        }
+                        if (out.lengthSquared() < 1.0e-9) out = normal.clone();
+                        ball.vel = out.normalize().multiply(ball.bounceSpeed);
                         // land well clear of the wall so next tick doesn't re-hit it
                         target = hit.getHitPosition().toLocation(world)
                             .add(normal.clone().multiply(0.3));
@@ -241,6 +279,19 @@ public final class Scp018Listener implements Listener {
             target.setDirection(ball.vel.lengthSquared() > 1.0e-9 ? ball.vel : new Vector(0, 0, 1));
             disp.teleport(target);
         }
+    }
+
+    /** Nearest reachable player to a point (ignores spectators + creative admins),
+     *  or null if none within range. */
+    private Player nearestPlayer(Location at, double range) {
+        Player best = null;
+        double bestSq = range * range;
+        for (Player p : at.getWorld().getPlayers()) {
+            if (p.getGameMode() == GameMode.SPECTATOR || p.getGameMode() == GameMode.CREATIVE) continue;
+            double d = p.getLocation().distanceSquared(at);
+            if (d < bestSq) { bestSq = d; best = p; }
+        }
+        return best;
     }
 
     // --- breakable / solid classification -------------------------------------
