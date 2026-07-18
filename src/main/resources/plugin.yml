@@ -1,5 +1,5 @@
 name: Labra
-version: '0.21.2'
+version: '0.21.3'
 main: fi.alavesa.labra.LabraPlugin
 api-version: '1.21'
 author: Piia Alavesa
