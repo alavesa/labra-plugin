@@ -51,7 +51,11 @@ import java.util.concurrent.ThreadLocalRandom;
  */
 public final class Scp018Listener implements Listener {
 
-    private static final double INITIAL_SPEED = 0.22;  // blocks/tick, first light hop
+    private static final double INITIAL_SPEED = 0.40;  // blocks/tick, first light hop
+    /** After a bounce, at least this fraction of the speed must point AWAY from
+     *  the wall, so the ball always clears the surface instead of micro-bouncing
+     *  in place / grinding into a corner. */
+    private static final double MIN_OUTWARD = 0.55;
     private static final double MAX_SPEED = 4.0;        // blocks/tick, cap
     /** Speed multiplier per bounce. Height ~ speed^2, so x sqrt(2) DOUBLES the
      *  bounce height each time. */
@@ -152,6 +156,17 @@ public final class Scp018Listener implements Listener {
             World world = disp.getWorld();
             Location pos = disp.getLocation();
 
+            // Un-stick: if it ever ends a tick inside a solid, non-breakable
+            // block, eject it upward so it can never grind in place forever.
+            Material hereMat = pos.getBlock().getType();
+            if (hereMat.isSolid() && !isBreakable(hereMat)) {
+                ThreadLocalRandom r = ThreadLocalRandom.current();
+                ball.vel = new Vector(r.nextDouble(-0.3, 0.3), 1.0, r.nextDouble(-0.3, 0.3))
+                    .normalize().multiply(Math.max(ball.bounceSpeed, INITIAL_SPEED));
+                disp.teleport(pos.clone().add(0, 1.0, 0));
+                continue;
+            }
+
             ball.vel.setY(ball.vel.getY() - GRAVITY);
             double speed = ball.vel.length();
             if (speed > MAX_SPEED) { ball.vel.multiply(MAX_SPEED / speed); }
@@ -182,7 +197,7 @@ public final class Scp018Listener implements Listener {
             Location target = pos.clone().add(ball.vel);
             if (speed > 1.0e-4) {
                 Vector dir = ball.vel.clone().multiply(1.0 / speed);
-                RayTraceResult hit = world.rayTraceBlocks(pos, dir, speed + 0.25,
+                RayTraceResult hit = world.rayTraceBlocks(pos, dir, speed + 0.1,
                     FluidCollisionMode.NEVER, true);
                 if (hit != null && hit.getHitBlock() != null) {
                     Block b = hit.getHitBlock();
@@ -197,13 +212,20 @@ public final class Scp018Listener implements Listener {
                         Vector reflected = dir.clone().subtract(
                             normal.clone().multiply(2 * dir.dot(normal)));
                         ThreadLocalRandom rng = ThreadLocalRandom.current();
-                        reflected.add(new Vector(rng.nextDouble(-0.12, 0.12),
-                            rng.nextDouble(-0.03, 0.12), rng.nextDouble(-0.12, 0.12)));
+                        reflected.add(new Vector(rng.nextDouble(-0.15, 0.15),
+                            rng.nextDouble(-0.1, 0.15), rng.nextDouble(-0.15, 0.15)));
+                        // GUARANTEE it leaves the surface: force a strong outward
+                        // (along-normal) component so it can't graze/stick/corner-grind.
+                        double along = reflected.dot(normal);
+                        if (along < MIN_OUTWARD) {
+                            reflected.add(normal.clone().multiply(MIN_OUTWARD - along));
+                        }
                         if (reflected.lengthSquared() < 1.0e-9) reflected = normal.clone();
                         ball.bounceSpeed = Math.min(MAX_SPEED, ball.bounceSpeed * BOUNCE_GROWTH);
                         ball.vel = reflected.normalize().multiply(ball.bounceSpeed);
+                        // land well clear of the wall so next tick doesn't re-hit it
                         target = hit.getHitPosition().toLocation(world)
-                            .add(normal.clone().multiply(0.15));
+                            .add(normal.clone().multiply(0.3));
                         world.playSound(target, Sound.BLOCK_NOTE_BLOCK_HAT,
                             (float) Math.min(1.0, 0.3 + ball.bounceSpeed * 0.3), 1.8f);
                     }
