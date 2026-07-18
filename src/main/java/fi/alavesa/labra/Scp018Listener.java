@@ -58,16 +58,22 @@ public final class Scp018Listener implements Listener {
      *  in place / grinding into a corner. */
     private static final double MIN_OUTWARD = 0.55;
     /** Player-seeking. On a bounce there's a SEEK_CHANCE it aims at the nearest
-     *  player instead of reflecting; a rarer LOCKON_CHANCE starts a homing run
-     *  where it flies straight at the player for HOMING_TICKS - a guaranteed hit. */
+     *  player instead of reflecting; a much rarer LOCKON_CHANCE starts a homing
+     *  run - it flies straight at the player for HOMING_TICKS, a guaranteed hit.
+     *  Lock-on is kept under ~1% so the guaranteed hit is a rare event, not a
+     *  constant harassment. */
     private static final double SEEK_RANGE = 22.0;
-    private static final double SEEK_CHANCE = 0.30;
-    private static final double LOCKON_CHANCE = 0.10;
+    private static final double SEEK_CHANCE = 0.12;
+    private static final double LOCKON_CHANCE = 0.008;   // <1% per bounce
     private static final int HOMING_TICKS = 100;   // 5s guaranteed pursuit
-    private static final double MAX_SPEED = 4.0;        // blocks/tick, cap
-    /** Speed multiplier per bounce. Height ~ speed^2, so x sqrt(2) DOUBLES the
-     *  bounce height each time. */
-    private static final double BOUNCE_GROWTH = 1.41421356;
+    /** No damage at all until the ball has bounced this many times - a slow,
+     *  fresh throw is harmless; it only hurts once it has built up energy. */
+    private static final int DAMAGE_AFTER_BOUNCES = 4;
+    private static final double DAMAGE_PER_SPEED = 5.0;  // damage = bounceSpeed * this
+    private static final double MAX_SPEED = 3.0;        // blocks/tick, cap (lower = less tunneling)
+    /** Speed multiplier per bounce - a gentle, gradual ramp so it doesn't rocket
+     *  to top speed in a few bounces (that read as "accelerates too abruptly"). */
+    private static final double BOUNCE_GROWTH = 1.22;
     /** Gravity applied to the ball each tick (blocks/tick^2). */
     private static final double GRAVITY = 0.08;
     /** Below this speed the ball just bounces off glass/doors; at or above it,
@@ -99,6 +105,7 @@ public final class Scp018Listener implements Listener {
         final UUID shooterId; // for damage attribution (nullable)
         int damageCd;         // ticks until it can strike an entity again
         int homingTicks;      // >0 = flying straight at a player (guaranteed hit)
+        int bounces;          // surface bounces so far (damage only after a few)
         Location lastSafe;    // last position that was in open air (un-stick fallback)
         Ball(Vector vel, double bounceSpeed, long bornMs, UUID shooterId) {
             this.vel = vel; this.bounceSpeed = bounceSpeed;
@@ -204,13 +211,16 @@ public final class Scp018Listener implements Listener {
             // and bounce off it, escalating. The THROWER is immune only for the
             // first 1.5s (so it doesn't hit them at their feet on the throw) -
             // after that it hits everyone, including whoever threw it.
+            // No damage at all for the first few bounces (a slow fresh throw is
+            // harmless), and it only strikes once its cooldown is up.
             if (ball.damageCd > 0) ball.damageCd--;
-            if (ball.damageCd == 0) {
+            if (ball.damageCd == 0 && ball.bounces >= DAMAGE_AFTER_BOUNCES) {
                 boolean grace = now - ball.bornMs < 1500L;
                 for (Entity near : world.getNearbyEntities(pos, 1.0, 1.0, 1.0)) {
                     if (!(near instanceof LivingEntity living)) continue;
                     if (grace && near.getUniqueId().equals(ball.shooterId)) continue;
-                    double dmg = Math.max(2.0, ball.bounceSpeed * 6.0);
+                    // scales purely with speed - no floor, so a slow ball barely stings
+                    double dmg = ball.bounceSpeed * DAMAGE_PER_SPEED;
                     LivingEntity src = ball.shooterId != null
                         && plugin.getServer().getEntity(ball.shooterId) instanceof LivingEntity le ? le : null;
                     if (src != null) living.damage(dmg, src); else living.damage(dmg);
@@ -219,9 +229,9 @@ public final class Scp018Listener implements Listener {
                     away.setY(Math.abs(away.getY()) + 0.3);
                     ball.bounceSpeed = Math.min(MAX_SPEED, ball.bounceSpeed * BOUNCE_GROWTH);
                     ball.vel = away.normalize().multiply(ball.bounceSpeed);
-                    ball.homingTicks = 0;   // lock-on satisfied
+                    ball.homingTicks = 0;   // lock-on satisfied - one hit per lock, not a barrage
                     world.playSound(pos, Sound.BLOCK_NOTE_BLOCK_HAT, 1f, 1.6f);
-                    ball.damageCd = 10;
+                    ball.damageCd = 20;     // >=1s between hits
                     break;
                 }
             }
@@ -244,6 +254,7 @@ public final class Scp018Listener implements Listener {
                         ThreadLocalRandom rng = ThreadLocalRandom.current();
                         Vector normal = face != null ? face.getDirection() : dir.clone().multiply(-1);
                         ball.bounceSpeed = Math.min(MAX_SPEED, ball.bounceSpeed * BOUNCE_GROWTH);
+                        ball.bounces++;
 
                         // rare: start a homing lock-on off this bounce (guaranteed chase)
                         if (ball.homingTicks == 0 && rng.nextDouble() < LOCKON_CHANCE
