@@ -45,8 +45,12 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class Scp018Listener implements Listener {
 
-    private static final double INITIAL_SPEED = 0.25;  // blocks per tick, first throw
-    private static final double MAX_SPEED = 2.5;       // blocks per tick, cap
+    private static final double INITIAL_SPEED = 0.22;  // blocks per tick, first (light) hop
+    private static final double MAX_SPEED = 4.0;       // blocks per tick, cap
+    /** Speed multiplier per surface bounce. Bounce HEIGHT scales with speed^2,
+     *  so x sqrt(2) per bounce DOUBLES the height each time - a light hop that
+     *  escalates over ~9 bounces before the cap. */
+    private static final double BOUNCE_GROWTH = 1.41421356;
     private static final long LIFETIME_MS = 180_000L;  // 3 minutes of bouncing
     private static final long RESTORE_MS = 300_000L;   // restore 5 minutes after damage
     private static final double SEEK_RANGE_SQ = 10.0 * 10.0;
@@ -115,11 +119,9 @@ public final class Scp018Listener implements Listener {
         if (egg.getPersistentDataContainer().has(ballKey, PersistentDataType.BYTE)) return; // a bounce respawn
         if (!isBallItem(egg.getItem())) return;
         tag(egg, 0, System.currentTimeMillis(), INITIAL_SPEED);
-        // No gravity, no drag-to-a-stop: the superball keeps its energy and only
-        // changes direction when it bounces. With gravity ON, falling between
-        // bounces skewed every reflection downward and horizontal bounces shrank
-        // even as the speed doubled - now each bounce is genuinely bigger.
-        egg.setGravity(false);
+        // Gravity STAYS ON: 018 is a superball that arcs and bounces off the
+        // floor, and each surface bounce multiplies its speed so the bounce
+        // HEIGHT doubles - it starts as a light hop and escalates into chaos.
         // Start it crawling: override the throw impulse with our tiny initial speed.
         Vector dir = egg.getVelocity();
         if (dir.lengthSquared() > 1.0e-9) {
@@ -166,8 +168,8 @@ public final class Scp018Listener implements Listener {
         // spent: three minutes of terror, then nothing at all
         if (System.currentTimeMillis() - born > LIFETIME_MS) return;
 
-        // Speed DOUBLES every hit (block or entity), capped.
-        double nextSpeed = Math.min(MAX_SPEED, prevSpeed * 2.0);
+        // Each bounce grows the speed so the bounce HEIGHT doubles, up to the cap.
+        double nextSpeed = Math.min(MAX_SPEED, prevSpeed * BOUNCE_GROWTH);
 
         // What did we hit? A block we can break, a wall we crack, or a body.
         Block hitBlock = event.getHitBlock();
@@ -212,9 +214,11 @@ public final class Scp018Listener implements Listener {
                     direction = mark.getEyeLocation().toVector().subtract(at.toVector()).normalize();
                 }
             } else {
-                // scatter: never twice off the same wall the same way
-                direction.add(new Vector(rng.nextDouble(-0.35, 0.35),
-                    rng.nextDouble(-0.2, 0.35), rng.nextDouble(-0.35, 0.35)).multiply(0.6));
+                // scatter: a LIGHT jitter so it never bounces the same way twice,
+                // with a slight upward bias so the reflection keeps its bounce
+                // height (a big downward scatter used to flatten the bounces).
+                direction.add(new Vector(rng.nextDouble(-0.25, 0.25),
+                    rng.nextDouble(-0.05, 0.25), rng.nextDouble(-0.25, 0.25)));
                 if (direction.lengthSquared() < 1.0e-9) return;
                 direction.normalize();
             }
@@ -229,8 +233,7 @@ public final class Scp018Listener implements Listener {
         Egg next = at.getWorld().spawn(from, Egg.class, spawned -> {
             spawned.setItem(item);
             spawned.setShooter(shooter);
-            spawned.setGravity(false);   // straight-line superball; energy only grows
-            tag(spawned, bounces, born, finalSpeed);
+            tag(spawned, bounces, born, finalSpeed);   // gravity ON - it arcs + bounces
         });
         next.setVelocity(send);
         lastPos.remove(egg.getUniqueId());
