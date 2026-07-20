@@ -38,8 +38,14 @@ public final class ActionBars {
                          Component transientLine, long transientUntil,
                          Component topLine, long topUntil) { }
 
+    /** The bottom-left vitals (blink + sprint): a glyph line pushed far left and
+     *  down to the XP-bar row. Re-sent every tick by the HUD, so it's short-lived. */
+    private record Meters(Component line, int width, int leftShift, long until) { }
+
     private static final Map<UUID, State> STATES = new ConcurrentHashMap<>();
+    private static final Map<UUID, Meters> METERS = new ConcurrentHashMap<>();
     private static final long TRANSIENT_MS = 4000;
+    private static final long METERS_MS = 500;
     /** The top line goes stale fast: its owner (the speedometer) re-sends it
      *  every tick while it's relevant, so it disappears within a couple of
      *  ticks of the driver letting go instead of lingering for seconds. */
@@ -51,15 +57,20 @@ public final class ActionBars {
         plugin.getServer().getScheduler().runTaskTimer(plugin, () -> {
             for (Player player : plugin.getServer().getOnlinePlayers()) {
                 State state = STATES.get(player.getUniqueId());
-                if (state == null) continue;
                 long now = System.currentTimeMillis();
-                if (state.persistent() == null
+                if (state != null && state.persistent() == null
                     && state.transientUntil() < now
                     && state.topUntil() < now) {
                     STATES.remove(player.getUniqueId());
-                    continue;
+                    state = null;
                 }
-                render(player, state);
+                Meters meters = METERS.get(player.getUniqueId());
+                if (meters != null && meters.until() < now) {
+                    METERS.remove(player.getUniqueId());
+                    meters = null;
+                }
+                if (state == null && meters == null) continue;
+                render(player);
             }
         }, 40L, 10L);
     }
@@ -73,7 +84,7 @@ public final class ActionBars {
             old == null ? null : old.topLine(),
             old == null ? 0 : old.topUntil());
         STATES.put(player.getUniqueId(), state);
-        render(player, state);
+        render(player);
     }
 
     /**
@@ -91,7 +102,7 @@ public final class ActionBars {
             old == null ? 0 : old.transientUntil(),
             text, System.currentTimeMillis() + TOP_MS);
         STATES.put(player.getUniqueId(), state);
-        render(player, state);
+        render(player);
     }
 
     /** The below-line slot. glyph = a lab:hud char; width = its pixel width. */
@@ -103,7 +114,7 @@ public final class ActionBars {
             old == null ? null : old.topLine(),
             old == null ? 0 : old.topUntil());
         STATES.put(player.getUniqueId(), state);
-        render(player, state);
+        render(player);
     }
 
     public static void clearPersistent(Player player) {
@@ -114,33 +125,73 @@ public final class ActionBars {
                 old.topLine(), old.topUntil()));
     }
 
-    private static void render(Player player, State state) {
+    /**
+     * The bottom-left blink+sprint meters. {@code line} is a lab:hud glyph line
+     * (its glyphs carry the negative ascent that drops it to the XP-bar row);
+     * {@code width} is its pixel advance; {@code leftShift} is how many pixels
+     * left of screen-center to anchor it. Re-send this every tick from the HUD.
+     */
+    public static void meters(Player player, Component line, int width, int leftShift) {
+        METERS.put(player.getUniqueId(),
+            new Meters(line, width, leftShift, System.currentTimeMillis() + METERS_MS));
+        render(player);
+    }
+
+    public static void clearMeters(Player player) {
+        METERS.remove(player.getUniqueId());
+    }
+
+    private static void render(Player player) {
         long now = System.currentTimeMillis();
-        boolean hasTop = state.topLine() != null && state.topUntil() >= now;
-        // The top line wins the text position: while it's live the transient
-        // message steps aside, so the speedometer never fights a gun message
-        // for the same baseline (that fight is what flickers).
-        Component text = hasTop ? state.topLine()
-            : (state.transientLine() != null && state.transientUntil() >= now
-                ? state.transientLine() : null);
-        if (state.persistent() == null) {
-            if (text != null) player.sendActionBar(text);
+        State state = STATES.get(player.getUniqueId());
+        Meters meters = METERS.get(player.getUniqueId());
+        boolean metersLive = meters != null && meters.until() >= now;
+
+        // --- build the centered "base" (top/transient text + persistent bar) ---
+        Component base = null;
+        int baseWidth = 0;   // total advance of base; the client centers on this
+        if (state != null) {
+            boolean hasTop = state.topLine() != null && state.topUntil() >= now;
+            Component text = hasTop ? state.topLine()
+                : (state.transientLine() != null && state.transientUntil() >= now
+                    ? state.transientLine() : null);
+            Component persistent = state.persistent();
+            if (persistent == null) {
+                if (text != null) { base = text; baseWidth = pixelWidth(text); }
+            } else if (text == null) {
+                base = persistent; baseWidth = state.persistentWidth();
+            } else {
+                int textWidth = pixelWidth(text);
+                int barWidth = state.persistentWidth();
+                base = text
+                    .append(advance(-(textWidth / 2 + barWidth / 2)))
+                    .append(persistent)
+                    .append(advance(textWidth / 2 - barWidth / 2));
+                baseWidth = textWidth;
+            }
+        }
+
+        if (!metersLive) {
+            if (base != null) player.sendActionBar(base);
             return;
         }
-        if (text == null) {
-            player.sendActionBar(state.persistent());
-            return;
+
+        // --- left-anchor the meters, keeping any base dead-centered ---
+        int shift = meters.leftShift();
+        int m = meters.width();
+        if (base == null || baseWidth == 0) {
+            // meters own the line: total advance 2*shift -> drawn from -shift,
+            // so the meters' left edge lands 'shift' px left of screen centre.
+            player.sendActionBar(meters.line().append(advance(2 * shift - m)));
+        } else {
+            // append with a net-zero advance so 'base' still centers on baseWidth,
+            // while the meters are placed 'shift' px left of centre, below-line.
+            base = base
+                .append(advance(-shift - baseWidth / 2))
+                .append(meters.line())
+                .append(advance(shift + baseWidth / 2 - m));
+            player.sendActionBar(base);
         }
-        // text, rewind to its center, draw the bar - then restore the
-        // cursor so the component's TOTAL advance equals the text width:
-        // the client centers by total width, so both the text and the bar
-        // land dead center regardless of message length
-        int textWidth = pixelWidth(text);
-        int barWidth = state.persistentWidth();
-        player.sendActionBar(text
-            .append(advance(-(textWidth / 2 + barWidth / 2)))
-            .append(state.persistent())
-            .append(advance(textWidth / 2 - barWidth / 2)));
     }
 
     /** Compose any pixel offset from the hud font's power-of-two spaces. */

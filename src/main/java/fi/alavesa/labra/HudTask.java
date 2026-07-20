@@ -1,11 +1,12 @@
 package fi.alavesa.labra;
 
 import net.kyori.adventure.bossbar.BossBar;
+import net.kyori.adventure.key.Key;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
-import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Bukkit;
+import org.bukkit.GameMode;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.entity.Player;
 import org.bukkit.scoreboard.Objective;
@@ -17,33 +18,36 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * The vitals stack: boss bars pinned to the top of every player's screen. Top to
- * bottom - the BLINK meter, the SPRINT stamina meter, then the health / body
- * temperature / clock strip.
+ * The vitals. The health / body-temperature / clock strip stays a boss bar at
+ * the TOP of the screen. The BLINK and SPRINT meters render bottom-left, down at
+ * the XP-bar row (SCP:CB style) - drawn with the lab:hud font (glyphs carry a
+ * negative ascent that drops them to that row) and pushed far left by the
+ * ActionBars hub. Blink is cyan, sprint green (both go red when nearly spent).
  *
- * The blink and sprint bars are drawn like the Guns ammo bar: a notched boss bar
- * plus a row of filled/empty segment glyphs and a percentage. Blink state is read
- * off the shared scoreboard (lab.blink, published by ScpMobs); sprint stamina
- * comes from Labra's own SprintManager.
+ * How far left they sit is config: hud.meters-x (pixels left of screen centre).
+ * The vertical row is baked into the font's ascent (tools/gen_hud.py METER_ASCENT).
  *
- * Body temperature is DYNAMIC: 37.0 C at rest, climbing toward 41 as an SCP-008
- * infection cooks its host, falling toward 30 as SCP-009 crystals spread.
- *
- * /lab hud toggles the whole stack per player (PDC-persisted).
+ * Blink state is read off the shared scoreboard (lab.blink, published by ScpMobs);
+ * sprint stamina comes from Labra's own SprintManager. /lab hud toggles it all.
  */
 public final class HudTask implements Runnable {
 
-    private static final int SEGMENTS = 10;               // segment glyphs in a meter row
-    private static final String FILLED = "█";
-    private static final String EMPTY = "░";
-    /** Shared scoreboard channel the blink meter is published on (see ScpMobs BlinkManager). */
+    private static final Key HUD_FONT = Key.key("lab", "hud");
+    private static final String EYE = "";       // blink icon
+    private static final String BOOT = "";      // sprint icon
+    private static final String GAP = "";       // lab:hud +8px space
+    private static final int BLINK_BAR_0 = 0xE210;    // cyan bar, +segment (0..10)
+    private static final int STAM_BAR_0 = 0xE230;     // green bar, +segment (0..10)
+    // Approximate advances (icon 8px+1, bar 46px+1, gap 8px) - only affects
+    // trailing padding, never the left anchor, so exactness doesn't matter.
+    private static final int W_ICON = 9, W_BAR = 47, W_GAP = 8;
+
+    /** Shared scoreboard channel the blink meter is published on (ScpMobs BlinkManager). */
     private static final String BLINK_OBJECTIVE = "lab.blink";
 
     private final LabraPlugin plugin;
     private final SprintManager sprint;
     private final Map<UUID, BossBar> health = new ConcurrentHashMap<>();
-    private final Map<UUID, BossBar> blink = new ConcurrentHashMap<>();
-    private final Map<UUID, BossBar> stamina = new ConcurrentHashMap<>();
 
     public HudTask(LabraPlugin plugin, SprintManager sprint) {
         this.plugin = plugin;
@@ -71,13 +75,9 @@ public final class HudTask implements Runnable {
     public void run() {
         for (Player player : plugin.getServer().getOnlinePlayers()) {
             if (hidden(player)) continue;
-            // Order matters: show blink first, then sprint, then health, so they
-            // stack top-to-bottom in that order on a fresh screen.
-            updateBlink(player);
-            updateSprint(player);
+            updateMeters(player);
             updateHealth(player);
         }
-        // players who logged off or toggled off
         for (UUID id : List.copyOf(health.keySet())) {
             Player online = plugin.getServer().getPlayer(id);
             if (online == null || hidden(online)) {
@@ -87,20 +87,32 @@ public final class HudTask implements Runnable {
         }
     }
 
-    // ---------------------------------------------------------------- blink
+    // ------------------------------------------- blink + sprint (bottom-left)
 
-    private void updateBlink(Player player) {
-        int pct = blinkPercent(player);
-        if (pct < 0) {                       // blink system off / not applicable - drop the bar
-            BossBar bar = blink.remove(player.getUniqueId());
-            if (bar != null) player.hideBossBar(bar);
+    private void updateMeters(Player player) {
+        if (player.getGameMode() != GameMode.SURVIVAL && player.getGameMode() != GameMode.ADVENTURE) {
+            ActionBars.clearMeters(player);
             return;
         }
-        float f = pct / 100f;
-        TextColor rowColor = f < 0.2f ? NamedTextColor.RED : NamedTextColor.AQUA;
-        BossBar.Color color = f < 0.2f ? BossBar.Color.RED : BossBar.Color.BLUE;
-        Component title = meter("Blink", NamedTextColor.AQUA, f, rowColor, pct);
-        show(blink, player, title, f, color);
+        int blinkPct = blinkPercent(player);            // -1 when blink is off
+        double stamFrac = sprint.fraction(player);
+
+        StringBuilder s = new StringBuilder();
+        int width = 0;
+        if (blinkPct >= 0) {
+            s.append(EYE).append((char) (BLINK_BAR_0 + segments(blinkPct / 100.0))).append(GAP);
+            width += W_ICON + W_BAR + W_GAP;
+        }
+        s.append(BOOT).append((char) (STAM_BAR_0 + segments(stamFrac)));
+        width += W_ICON + W_BAR;
+
+        Component line = Component.text(s.toString()).font(HUD_FONT).color(NamedTextColor.WHITE);
+        int leftShift = plugin.getConfig().getInt("hud.meters-x", 220);
+        ActionBars.meters(player, line, width, leftShift);
+    }
+
+    private int segments(double fraction) {
+        return Math.max(0, Math.min(10, (int) Math.round(fraction * 10)));
     }
 
     /** -1 when the blink meter isn't published for this player. */
@@ -109,22 +121,6 @@ public final class HudTask implements Runnable {
         if (obj == null) return -1;
         var score = obj.getScore(player.getName());
         return score.isScoreSet() ? Math.max(0, Math.min(100, score.getScore())) : -1;
-    }
-
-    // --------------------------------------------------------------- sprint
-
-    private void updateSprint(Player player) {
-        double f = sprint.fraction(player);
-        boolean winded = sprint.isWinded(player);
-        int pct = (int) Math.round(f * 100);
-        TextColor rowColor = winded ? NamedTextColor.RED
-            : f > 0.5 ? NamedTextColor.GREEN : f > 0.25 ? NamedTextColor.YELLOW : NamedTextColor.GOLD;
-        BossBar.Color color = winded ? BossBar.Color.RED
-            : f > 0.5 ? BossBar.Color.GREEN : f > 0.25 ? BossBar.Color.YELLOW : BossBar.Color.RED;
-        Component label = winded ? Component.text("Sprint (winded)", NamedTextColor.RED)
-            : Component.text("Sprint", NamedTextColor.GREEN);
-        Component title = meterTitled(label, (float) f, rowColor, pct);
-        show(stamina, player, title, (float) f, color);
     }
 
     // --------------------------------------------------------------- health
@@ -173,48 +169,13 @@ public final class HudTask implements Runnable {
 
     // ---------------------------------------------------------------- shared
 
-    /** A labelled segment meter, styled like the Guns ammo bar. */
-    private Component meter(String label, TextColor labelColor, float fraction, TextColor rowColor, int pct) {
-        return meterTitled(Component.text(label, labelColor), fraction, rowColor, pct);
-    }
-
-    private Component meterTitled(Component label, float fraction, TextColor rowColor, int pct) {
-        int filled = Math.max(0, Math.min(SEGMENTS, Math.round(fraction * SEGMENTS)));
-        Component row = Component.text(FILLED.repeat(filled), rowColor)
-            .append(Component.text(EMPTY.repeat(SEGMENTS - filled), NamedTextColor.DARK_GRAY));
-        return Component.text()
-            .append(label)
-            .append(Component.text("  "))
-            .append(row)
-            .append(Component.text("  " + pct + "%", NamedTextColor.WHITE))
-            .build();
-    }
-
-    private void show(Map<UUID, BossBar> store, Player player, Component title, float fraction, BossBar.Color color) {
-        float f = Math.max(0f, Math.min(1f, fraction));
-        BossBar bar = store.get(player.getUniqueId());
-        if (bar == null) {
-            bar = BossBar.bossBar(title, f, color, BossBar.Overlay.NOTCHED_10);
-            store.put(player.getUniqueId(), bar);
-            player.showBossBar(bar);
-        } else {
-            bar.name(title);
-            bar.progress(f);
-            bar.color(color);
-        }
-    }
-
     private void hideAll(Player player) {
-        UUID id = player.getUniqueId();
-        for (Map<UUID, BossBar> store : List.of(blink, stamina, health)) {
-            BossBar bar = store.remove(id);
-            if (bar != null) player.hideBossBar(bar);
-        }
+        BossBar bar = health.remove(player.getUniqueId());
+        if (bar != null) player.hideBossBar(bar);
+        ActionBars.clearMeters(player);
     }
 
     private void forget(UUID id) {
-        blink.remove(id);
-        stamina.remove(id);
         health.remove(id);
     }
 
@@ -242,12 +203,10 @@ public final class HudTask implements Runnable {
     }
 
     public void shutdown() {
-        for (Map<UUID, BossBar> store : List.of(blink, stamina, health)) {
-            for (UUID id : store.keySet()) {
-                Player player = plugin.getServer().getPlayer(id);
-                if (player != null) player.hideBossBar(store.get(id));
-            }
-            store.clear();
+        for (UUID id : health.keySet()) {
+            Player player = plugin.getServer().getPlayer(id);
+            if (player != null) player.hideBossBar(health.get(id));
         }
+        health.clear();
     }
 }
