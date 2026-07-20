@@ -56,6 +56,13 @@ public final class SprintManager implements Runnable, Listener {
             double s = stamina.getOrDefault(id, MAX);
             boolean wind = winded.getOrDefault(id, false);
 
+            // Sprint is governed by THIS stamina bar, not vanilla hunger. Vanilla
+            // refuses to sprint (and auto-stops it) once food drops to 6 or below,
+            // which is what made a full bar sometimes not let you run, and made the
+            // drain miss (isSprinting flickering off). Keep food above that gate so
+            // stamina is the only thing that decides whether you can sprint.
+            if (player.getFoodLevel() < 7) player.setFoodLevel(7);
+
             boolean sprinting = player.isSprinting() && !wind;
             if (sprinting) {
                 s -= DRAIN;
