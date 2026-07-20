@@ -336,12 +336,19 @@ public final class LabraPlugin extends JavaPlugin {
 
     private boolean datapackReady(CommandSender sender) {
         int version = datapackVersion();
-        if (version >= DATAPACK_VERSION) return true;
-        error(sender, version == 0
-            ? "The lab-datapack is missing from this world - nothing to give."
-            : "The lab-datapack in this world is outdated (v0." + version + ", need v0." + DATAPACK_VERSION + "+).");
-        error(sender, "Get Lab.zip from github.com/alavesa/lab-datapack/releases, extract into world/datapacks/, then /minecraft:reload.");
-        return false;
+        if (version == 0) {   // truly absent: the functions aren't there, so refuse
+            error(sender, "The lab-datapack is missing from this world - nothing to give.");
+            error(sender, "Get Lab.zip from github.com/alavesa/lab-datapack/releases, extract into world/datapacks/, then /minecraft:reload.");
+            return false;
+        }
+        // Present but an older marker: attempt the give anyway (the function very
+        // likely exists) and just warn - blocking here on an exact version was
+        // breaking every give whenever the datapack loaded with a stale marker.
+        if (version < DATAPACK_VERSION) {
+            getLogger().warning("lab-datapack marker is v0." + version + " (expected v0."
+                + DATAPACK_VERSION + "+); attempting the give anyway. Update Lab.zip if items look wrong.");
+        }
+        return true;
     }
 
     /** Run a lab-datapack function as the given player (the datapack is the

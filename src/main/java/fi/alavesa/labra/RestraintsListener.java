@@ -48,10 +48,15 @@ public final class RestraintsListener implements Listener, Runnable {
 
     private static final double BEHIND_DOT = -0.35;
     private static final int STRUGGLE_SECONDS = 20;
+    /** After tying someone you can't immediately untie them. The 2s right-click
+     *  hold that ties them also fires a release interact the instant it finishes,
+     *  which was untying them on the spot - this cooldown swallows that. */
+    private static final long UNTIE_COOLDOWN_MS = 2500L;
 
     private final LabraPlugin plugin;
     private final NamespacedKey restrainedKey;            // "ziptie" | "handcuffs" on the victim
     private final Map<UUID, Integer> struggling = new HashMap<>();
+    private final Map<UUID, Long> tiedAt = new HashMap<>();   // victim -> when they were restrained
     private final Map<UUID, UUID> prisonerOf = new HashMap<>(); // captor -> cuffed victim
     private final Map<UUID, UUID> captorOf = new HashMap<>();   // victim -> captor
 
@@ -102,6 +107,7 @@ public final class RestraintsListener implements Listener, Runnable {
             return;
         }
         victim.getPersistentDataContainer().set(restrainedKey, PersistentDataType.STRING, type);
+        tiedAt.put(victim.getUniqueId(), System.currentTimeMillis());   // start the untie cooldown
         if (type.equals("ziptie")) {
             ItemStack hand = captor.getInventory().getItemInMainHand();
             if (restraintType(hand) != null) hand.setAmount(hand.getAmount() - 1);
@@ -165,6 +171,7 @@ public final class RestraintsListener implements Listener, Runnable {
     private void free(Player player) {
         player.getPersistentDataContainer().remove(restrainedKey);
         struggling.remove(player.getUniqueId());
+        tiedAt.remove(player.getUniqueId());
         UUID captorId = captorOf.remove(player.getUniqueId());
         if (captorId != null) prisonerOf.remove(captorId);
         player.removePotionEffect(PotionEffectType.SLOWNESS);
@@ -182,6 +189,13 @@ public final class RestraintsListener implements Listener, Runnable {
         boolean emptyHand = hand.getType().isAir();
         boolean holdsRestraint = restraintType(hand) != null;
         if (!emptyHand && !holdsRestraint) return;
+        // Cooldown: can't untie someone the instant you tied them (the tie's own
+        // right-click hold would otherwise release them immediately).
+        Long tied = tiedAt.get(victim.getUniqueId());
+        if (tied != null && System.currentTimeMillis() - tied < UNTIE_COOLDOWN_MS) {
+            event.setCancelled(true);
+            return;
+        }
         // holding a restraint on a FREE target starts a capture, not a
         // release - only clicks on the restrained land here anyway
         event.setCancelled(true);
