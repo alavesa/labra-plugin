@@ -64,8 +64,11 @@ public final class LabraPlugin extends JavaPlugin {
         getServer().getScheduler().runTaskTimer(this, restraints, 40L, 20L);
         labMenu = new LabMenu(this);
         getServer().getPluginManager().registerEvents(labMenu, this);
-        hud = new HudTask(this);
-        getServer().getScheduler().runTaskTimer(this, hud, 40L, 20L);
+        SprintManager sprint = new SprintManager();
+        getServer().getPluginManager().registerEvents(sprint, this);
+        getServer().getScheduler().runTaskTimer(this, sprint, 40L, 2L);
+        hud = new HudTask(this, sprint);
+        getServer().getScheduler().runTaskTimer(this, hud, 40L, 5L);
         DownedListener dying = new DownedListener(this);
         getServer().getPluginManager().registerEvents(dying, this);
         getServer().getScheduler().runTaskTimer(this, dying, 40L, 20L);
