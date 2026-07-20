@@ -28,6 +28,7 @@ public final class LabraPlugin extends JavaPlugin {
     private HudTask hud;
     private Scp268Listener scp268;
     private Scp018Listener scp018;
+    private FireManager fire;
 
     @Override
     public void onEnable() {
@@ -52,6 +53,9 @@ public final class LabraPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(scp018, this);
         getServer().getScheduler().runTaskTimer(this, scp018::restoreTick, 100L, 100L);
         getServer().getScheduler().runTaskTimer(this, scp018::ballTick, 1L, 1L);
+        fire = new FireManager(this, registry);
+        getServer().getPluginManager().registerEvents(fire, this);
+        getServer().getScheduler().runTaskTimer(this, fire, 1200L, 1200L);   // fire housekeeping every minute
         Scp038Listener scp038 = new Scp038Listener(this);
         getServer().getPluginManager().registerEvents(scp038, this);
         getServer().getScheduler().runTaskTimer(this, scp038, 40L, 20L);
@@ -158,9 +162,31 @@ public final class LabraPlugin extends JavaPlugin {
                             sender.sendMessage(Component.text("Gave " + count + " x " + symbol
                                 + " to " + target.getName(), NamedTextColor.AQUA));
                         }
-                        default -> { return error(sender, "Unknown item. Items: hazmat, geiger, sample, kit, rod, pipette, manual, table, element"); }
+                        case "extinguisher" -> {
+                            if (!sender.hasPermission("lab.give")) return error(sender, "No permission.");
+                            target.getInventory().addItem(registry.buildExtinguisher()).values()
+                                .forEach(left -> target.getWorld().dropItemNaturally(target.getLocation(), left));
+                            sender.sendMessage(Component.text("Gave a fire extinguisher to "
+                                + target.getName(), NamedTextColor.RED));
+                        }
+                        default -> { return error(sender, "Unknown item. Items: hazmat, geiger, sample, extinguisher, kit, rod, pipette, manual, table, element"); }
                     }
                     return true;
+                }
+                case "extinguisher" -> {
+                    if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
+                    if (!(sender instanceof Player player)) return error(sender, "Players only.");
+                    String sub = args.length >= 2 ? args[1].toLowerCase() : "";
+                    if (sub.equals("mount")) {
+                        return fire.placeMount(player)
+                            ? ok(sender, "Extinguisher mount placed on the wall. Right-click it to take or return the extinguisher.")
+                            : error(sender, "Look at a wall within 5 blocks to mount it.");
+                    }
+                    if (sub.equals("remove")) {
+                        return fire.removeMount(player) ? ok(sender, "Mount removed.")
+                            : error(sender, "Look at a mount to remove it.");
+                    }
+                    return error(sender, "/lab extinguisher mount|remove");
                 }
                 case "place" -> {
                     if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
@@ -292,9 +318,9 @@ public final class LabraPlugin extends JavaPlugin {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         return switch (args.length) {
-            case 1 -> filter(Stream.of("give", "zone", "place", "removemachines", "admin", "scp1499", "reload"), args[0]);
+            case 1 -> filter(Stream.of("give", "zone", "place", "extinguisher", "removemachines", "admin", "scp1499", "reload"), args[0]);
             case 2 -> switch (args[0].toLowerCase()) {
-                case "give" -> filter(Stream.of("hazmat", "geiger", "sample", "kit", "rod",
+                case "give" -> filter(Stream.of("hazmat", "geiger", "sample", "extinguisher", "kit", "rod",
                     "pipette", "manual", "table", "element",
                     "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "quarter",
                     "scp268", "scp1499", "scp714", "scp018", "scp427", "scp1033",
@@ -302,6 +328,7 @@ public final class LabraPlugin extends JavaPlugin {
                 case "zone" -> filter(Stream.of("add", "remove", "list", "alarm"), args[1]);
                 case "scp1499" -> filter(Stream.of("sethere", "info"), args[1]);
                 case "place" -> filter(MACHINES.stream(), args[1]);
+                case "extinguisher" -> filter(Stream.of("mount", "remove"), args[1]);
                 default -> List.of();
             };
             case 3 -> args[0].equalsIgnoreCase("zone")
@@ -378,6 +405,11 @@ public final class LabraPlugin extends JavaPlugin {
 
     private boolean error(CommandSender sender, String message) {
         sender.sendMessage(Component.text(message, NamedTextColor.RED));
+        return true;
+    }
+
+    private boolean ok(CommandSender sender, String message) {
+        sender.sendMessage(Component.text(message, NamedTextColor.GRAY));
         return true;
     }
 }

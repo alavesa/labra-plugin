@@ -40,6 +40,7 @@ public final class LabRegistry {
     private final NamespacedKey wearKey;
     private final NamespacedKey geigerKey;
     private final NamespacedKey sampleKey;
+    private final NamespacedKey extinguisherKey;
     private final Map<String, Zone> zones = new LinkedHashMap<>();
     private File file;
     private YamlConfiguration yaml;
@@ -57,6 +58,37 @@ public final class LabRegistry {
         this.wearKey = new NamespacedKey(plugin, "hazmat_wear");
         this.geigerKey = new NamespacedKey(plugin, "geiger");
         this.sampleKey = new NamespacedKey(plugin, "sample");
+        this.extinguisherKey = new NamespacedKey(plugin, "extinguisher");
+    }
+
+    /** The held fire extinguisher: right-click sprays and puts out fire. */
+    public ItemStack buildExtinguisher() {
+        ItemStack item = new ItemStack(Material.BRICK);
+        ItemMeta meta = item.getItemMeta();
+        meta.itemName(Component.text("Fire Extinguisher", NamedTextColor.RED)
+            .decoration(TextDecoration.ITALIC, false));
+        CustomModelDataComponent cmd = meta.getCustomModelDataComponent();
+        cmd.setStrings(List.of("lab_extinguisher"));
+        meta.setCustomModelDataComponent(cmd);
+        meta.getPersistentDataContainer().set(extinguisherKey, PersistentDataType.BYTE, (byte) 1);
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    /** The item shown on a wall mount (the extinguisher, cradled). */
+    public ItemStack buildMountItem() {
+        ItemStack item = new ItemStack(Material.BRICK);
+        ItemMeta meta = item.getItemMeta();
+        CustomModelDataComponent cmd = meta.getCustomModelDataComponent();
+        cmd.setStrings(List.of("lab_extinguisher_mount"));
+        meta.setCustomModelDataComponent(cmd);
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    public boolean isExtinguisher(ItemStack item) {
+        return item != null && item.hasItemMeta()
+            && item.getItemMeta().getPersistentDataContainer().has(extinguisherKey, PersistentDataType.BYTE);
     }
 
     public void load() {
