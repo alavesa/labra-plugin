@@ -31,7 +31,13 @@ import java.util.UUID;
  */
 public final class NvgListener implements Listener, Runnable {
 
-    private static final int FULL_CHARGE_SECONDS = 30 * 60;
+    private static final int FULL_CHARGE_SECONDS = 30 * 60;   // green: 30 minutes
+    private static final int BLUE_CHARGE_SECONDS = 3 * 60;    // blue recon: only 3 minutes (it's strong)
+
+    /** A full tank for this goggle type. Red is infinite (handled separately). */
+    private int capacity(String type) {
+        return "blue".equals(type) ? BLUE_CHARGE_SECONDS : FULL_CHARGE_SECONDS;
+    }
 
     private final LabraPlugin plugin;
     private final LabRegistry registry;
@@ -51,16 +57,16 @@ public final class NvgListener implements Listener, Runnable {
         return item.getItemMeta().getCustomModelDataComponent().getStrings().contains("lab_battery");
     }
 
-    private int charge(ItemStack goggles) {
+    private int charge(ItemStack goggles, int cap) {
         Integer stored = goggles.getItemMeta().getPersistentDataContainer()
             .get(chargeKey, PersistentDataType.INTEGER);
-        return stored == null ? FULL_CHARGE_SECONDS : stored;
+        return stored == null ? cap : Math.min(stored, cap);   // fresh pair = full tank
     }
 
-    private void setCharge(ItemStack goggles, int seconds) {
+    private void setCharge(ItemStack goggles, int seconds, int cap) {
         var meta = goggles.getItemMeta();
         meta.getPersistentDataContainer().set(chargeKey, PersistentDataType.INTEGER,
-            Math.max(0, Math.min(FULL_CHARGE_SECONDS, seconds)));
+            Math.max(0, Math.min(cap, seconds)));
         goggles.setItemMeta(meta);
     }
 
@@ -77,14 +83,15 @@ public final class NvgListener implements Listener, Runnable {
                 if (wasSeeing.remove(player.getUniqueId())) player.removePotionEffect(PotionEffectType.NIGHT_VISION);
                 continue;
             }
-            boolean infinite = !type.equals("green");
-            int left = infinite ? FULL_CHARGE_SECONDS : charge(helmet) - 1;
-            if (!infinite) setCharge(helmet, left);
+            boolean infinite = type.equals("red");   // only red never drains; blue is short-lived
+            int cap = capacity(type);
+            int left = infinite ? cap : charge(helmet, cap) - 1;
+            if (!infinite) setCharge(helmet, left, cap);
 
             if (left > 0) {
                 wasSeeing.add(player.getUniqueId());
                 player.addPotionEffect(new PotionEffect(PotionEffectType.NIGHT_VISION, 300, 0, true, false));
-                int segments = infinite ? 10 : (int) Math.ceil(left * 10.0 / FULL_CHARGE_SECONDS);
+                int segments = infinite ? 10 : (int) Math.ceil(left * 10.0 / cap);
                 Integer prev = lastSegments.put(player.getUniqueId(), segments);
                 ActionBars.persistent(player, batteryGlyph(segments), 46);
                 if (!infinite && prev != null && segments <= 2 && prev != segments) {
@@ -138,12 +145,14 @@ public final class NvgListener implements Listener, Runnable {
             }
         }
         if (goggles == null) { ActionBars.message(player, line("Nothing to power.")); return; }
-        if (!"green".equals(registry.nvgType(goggles))) {
-            ActionBars.message(player, line("These don't take a cell."));
+        String type = registry.nvgType(goggles);
+        if ("red".equals(type)) {
+            ActionBars.message(player, line("These don't take a cell."));   // red is infinite
             return;
         }
-        if (charge(goggles) >= FULL_CHARGE_SECONDS - 5) { ActionBars.message(player, line("Still charged.")); return; }
-        setCharge(goggles, FULL_CHARGE_SECONDS);
+        int cap = capacity(type);
+        if (charge(goggles, cap) >= cap - 5) { ActionBars.message(player, line("Still charged.")); return; }
+        setCharge(goggles, cap, cap);
         battery.setAmount(battery.getAmount() - 1);
         ActionBars.message(player, line("Fresh cell. The dark turns green."));
         player.playSound(player.getLocation(), Sound.BLOCK_IRON_TRAPDOOR_CLOSE, 0.7f, 1.6f);

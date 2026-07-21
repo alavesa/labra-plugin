@@ -58,7 +58,7 @@ public final class FireManager implements Listener, Runnable {
     private static final long SPRINKLER_COOLDOWN_MS = 300_000; // 5-minute cooldown per button
     private static final int MOUNT_REFILL_STEP = LabRegistry.EXTINGUISHER_MAX / 10; // 10% per tick
     private static final int NOXIOUS_FIRE_THRESHOLD = 8;      // fire blocks near a player before smoke bites
-    private static final int NOXIOUS_RADIUS = 9;             // widest smoke reach (scales up with fire count)
+    private static final int NOXIOUS_RADIUS = 6;             // widest smoke reach (scales up with fire count)
 
     private final LabraPlugin plugin;
     private final LabRegistry registry;
@@ -202,8 +202,10 @@ public final class FireManager implements Listener, Runnable {
             int exposure = smoke.getOrDefault(id, 0) + 1;
             smoke.put(id, exposure);
             int sev = Math.min(3, fire / 12);
-            p.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, 100, 0, true, false, false));
-            p.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, 40, sev, true, false, false));
+            // short durations, re-applied each second while in smoke, so they clear
+            // within ~1.5s of stepping out - no lingering effect once the fire's gone
+            p.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, 30, 0, true, false, false));
+            p.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, 30, sev, true, false, false));
             ActionBars.message(p, Component.text("You inhale the smoke.", NamedTextColor.GRAY, TextDecoration.ITALIC));
             if (exposure > SMOKE_DYING_AFTER) {
                 p.damage(1.0 + Math.min(3.0, (exposure - SMOKE_DYING_AFTER) / 4.0));   // choking, escalating
