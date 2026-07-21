@@ -57,6 +57,8 @@ public final class LabraPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(fire, this);
         getServer().getScheduler().runTaskTimer(this, fire, 1200L, 1200L);   // fire housekeeping every minute
         getServer().getScheduler().runTaskTimer(this, fire::sprinklerTick, 40L, 10L);   // active sprinklers
+        getServer().getScheduler().runTaskTimer(this, fire::refillMounts, 200L, 200L);  // mounts refill 10%/10s
+        getServer().getScheduler().runTaskTimer(this, fire::noxiousTick, 40L, 20L);      // smoke harm every second
         Scp038Listener scp038 = new Scp038Listener(this);
         getServer().getPluginManager().registerEvents(scp038, this);
         getServer().getScheduler().runTaskTimer(this, scp038, 40L, 20L);
@@ -69,7 +71,7 @@ public final class LabraPlugin extends JavaPlugin {
         getServer().getScheduler().runTaskTimer(this, restraints, 40L, 20L);
         labMenu = new LabMenu(this);
         getServer().getPluginManager().registerEvents(labMenu, this);
-        SprintManager sprint = new SprintManager();
+        SprintManager sprint = new SprintManager(registry);
         getServer().getPluginManager().registerEvents(sprint, this);
         getServer().getScheduler().runTaskTimer(this, sprint, 40L, 2L);
         hud = new HudTask(this, sprint);
@@ -170,7 +172,16 @@ public final class LabraPlugin extends JavaPlugin {
                             sender.sendMessage(Component.text("Gave a fire extinguisher to "
                                 + target.getName(), NamedTextColor.RED));
                         }
-                        default -> { return error(sender, "Unknown item. Items: hazmat, geiger, sample, extinguisher, kit, rod, pipette, manual, table, element"); }
+                        case "gasmask", "supergasmask", "heavygasmask" -> {
+                            if (!sender.hasPermission("lab.give")) return error(sender, "No permission.");
+                            String tier = args[1].equalsIgnoreCase("supergasmask") ? "super"
+                                : args[1].equalsIgnoreCase("heavygasmask") ? "heavy" : "normal";
+                            target.getInventory().addItem(registry.buildGasMask(tier)).values()
+                                .forEach(left -> target.getWorld().dropItemNaturally(target.getLocation(), left));
+                            sender.sendMessage(Component.text("Gave a " + tier + " gas mask to "
+                                + target.getName(), NamedTextColor.GREEN));
+                        }
+                        default -> { return error(sender, "Unknown item. Items: hazmat, geiger, sample, extinguisher, gasmask, supergasmask, heavygasmask, kit, rod, pipette, manual, table, element"); }
                     }
                     return true;
                 }
@@ -188,6 +199,38 @@ public final class LabraPlugin extends JavaPlugin {
                             : error(sender, "Look at a mount to remove it.");
                     }
                     return error(sender, "/lab extinguisher mount|remove");
+                }
+                case "sprinkler" -> {
+                    if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
+                    if (!(sender instanceof Player player)) return error(sender, "Players only.");
+                    String sub = args.length >= 2 ? args[1].toLowerCase() : "";
+                    switch (sub) {
+                        case "button" -> {
+                            return fire.placeSprinklerButton(player)
+                                ? ok(sender, "Sprinkler button placed - it's now your active button. Aim at each "
+                                    + "hanging_roots sprinkler and run /lab sprinkler link.")
+                                : error(sender, "Look at a wall within 5 blocks to place the button.");
+                        }
+                        case "select" -> {
+                            return fire.selectSprinklerButton(player)
+                                ? ok(sender, "Button selected - /lab sprinkler link the sprinklers you want it to run.")
+                                : error(sender, "Look at a sprinkler button to select it.");
+                        }
+                        case "link" -> {
+                            String r = fire.linkSprinkler(player);
+                            // linkSprinkler returns the new count on success, or an error string
+                            if (r != null && r.chars().allMatch(Character::isDigit)) {
+                                return ok(sender, "Linked (" + r + " sprinkler" + (r.equals("1") ? "" : "s")
+                                    + " on this button). Right-click the button to test.");
+                            }
+                            return error(sender, r == null ? "Could not link." : r);
+                        }
+                        case "remove" -> {
+                            return fire.removeSprinklerButton(player) ? ok(sender, "Sprinkler button removed.")
+                                : error(sender, "Look at a sprinkler button to remove it.");
+                        }
+                        default -> { return error(sender, "/lab sprinkler button|select|link|remove"); }
+                    }
                 }
                 case "place" -> {
                     if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
@@ -319,9 +362,10 @@ public final class LabraPlugin extends JavaPlugin {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         return switch (args.length) {
-            case 1 -> filter(Stream.of("give", "zone", "place", "extinguisher", "removemachines", "admin", "scp1499", "reload"), args[0]);
+            case 1 -> filter(Stream.of("give", "zone", "place", "extinguisher", "sprinkler", "removemachines", "admin", "scp1499", "reload"), args[0]);
             case 2 -> switch (args[0].toLowerCase()) {
-                case "give" -> filter(Stream.of("hazmat", "geiger", "sample", "extinguisher", "kit", "rod",
+                case "give" -> filter(Stream.of("hazmat", "geiger", "sample", "extinguisher",
+                    "gasmask", "supergasmask", "heavygasmask", "kit", "rod",
                     "pipette", "manual", "table", "element",
                     "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "quarter",
                     "scp268", "scp1499", "scp714", "scp018", "scp427", "scp1033",
@@ -330,6 +374,7 @@ public final class LabraPlugin extends JavaPlugin {
                 case "scp1499" -> filter(Stream.of("sethere", "info"), args[1]);
                 case "place" -> filter(MACHINES.stream(), args[1]);
                 case "extinguisher" -> filter(Stream.of("mount", "remove"), args[1]);
+                case "sprinkler" -> filter(Stream.of("button", "select", "link", "remove"), args[1]);
                 default -> List.of();
             };
             case 3 -> args[0].equalsIgnoreCase("zone")

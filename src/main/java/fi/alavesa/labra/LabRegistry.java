@@ -107,10 +107,19 @@ public final class LabRegistry {
 
     /** The item shown on a wall mount (the extinguisher, cradled). */
     public ItemStack buildMountItem() {
+        return modelItem("lab_extinguisher_mount");
+    }
+
+    /** The item shown on a sprinkler control button display. */
+    public ItemStack buildSprinklerButtonItem() {
+        return modelItem("lab_sprinkler_button");
+    }
+
+    private ItemStack modelItem(String model) {
         ItemStack item = new ItemStack(Material.BRICK);
         ItemMeta meta = item.getItemMeta();
         CustomModelDataComponent cmd = meta.getCustomModelDataComponent();
-        cmd.setStrings(List.of("lab_extinguisher_mount"));
+        cmd.setStrings(List.of(model));
         meta.setCustomModelDataComponent(cmd);
         item.setItemMeta(meta);
         return item;
@@ -119,6 +128,43 @@ public final class LabRegistry {
     public boolean isExtinguisher(ItemStack item) {
         return item != null && item.hasItemMeta()
             && item.getItemMeta().getPersistentDataContainer().has(extinguisherKey, PersistentDataType.BYTE);
+    }
+
+    // --- gas masks (all three look identical; the tier is only in the data) ------
+    private final NamespacedKey gasMaskKey = new NamespacedKey("labra", "gasmask");
+
+    /** A worn carved-pumpkin gas mask. tier: "normal" (smoke immunity), "super"
+     *  (+ infinite sprint stamina), "heavy" (+ immunity to memetic hazards). */
+    public ItemStack buildGasMask(String tier) {
+        String t = switch (tier == null ? "" : tier.toLowerCase()) {
+            case "super", "heavy" -> tier.toLowerCase();
+            default -> "normal";
+        };
+        ItemStack item = new ItemStack(Material.CARVED_PUMPKIN);
+        ItemMeta meta = item.getItemMeta();
+        String name = switch (t) {
+            case "super" -> "Super Gas Mask";
+            case "heavy" -> "Heavy Gas Mask";
+            default -> "Gas Mask";
+        };
+        meta.itemName(Component.text(name, NamedTextColor.GREEN).decoration(TextDecoration.ITALIC, false));
+        CustomModelDataComponent cmd = meta.getCustomModelDataComponent();
+        cmd.setStrings(List.of("lab_gasmask"));   // identical model for every tier
+        meta.setCustomModelDataComponent(cmd);
+        meta.getPersistentDataContainer().set(gasMaskKey, PersistentDataType.STRING, t);
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    public boolean isGasMask(ItemStack item) {
+        return item != null && item.hasItemMeta()
+            && item.getItemMeta().getPersistentDataContainer().has(gasMaskKey, PersistentDataType.STRING);
+    }
+
+    /** "normal" | "super" | "heavy", or null if it isn't a gas mask. */
+    public String gasMaskTier(ItemStack item) {
+        if (!isGasMask(item)) return null;
+        return item.getItemMeta().getPersistentDataContainer().get(gasMaskKey, PersistentDataType.STRING);
     }
 
     public void load() {

@@ -29,8 +29,13 @@ public final class SprintManager implements Runnable, Listener {
     private static final double RECOVER_AT = 40.0;      // must reach this to sprint again
     private static final int TICK_PERIOD = 2;           // scheduled every 2 ticks
 
+    private final LabRegistry registry;
     private final Map<UUID, Double> stamina = new HashMap<>();
     private final Map<UUID, Boolean> winded = new HashMap<>();
+
+    public SprintManager(LabRegistry registry) {
+        this.registry = registry;
+    }
 
     private static final double DRAIN = MAX / (SPRINT_SECONDS * 20.0 / TICK_PERIOD);
     private static final double REGEN = MAX / (REGEN_SECONDS * 20.0 / TICK_PERIOD);
@@ -53,6 +58,13 @@ public final class SprintManager implements Runnable, Listener {
                 continue;
             }
             UUID id = player.getUniqueId();
+            // The Super Gas Mask grants infinite stamina: bar stays full, never winded.
+            if ("super".equals(registry.gasMaskTier(player.getInventory().getHelmet()))) {
+                stamina.put(id, MAX);
+                winded.put(id, false);
+                if (player.getFoodLevel() < 7) player.setFoodLevel(7);
+                continue;
+            }
             double s = stamina.getOrDefault(id, MAX);
             boolean wind = winded.getOrDefault(id, false);
 

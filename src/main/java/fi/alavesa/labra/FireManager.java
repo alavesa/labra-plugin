@@ -2,9 +2,14 @@ package fi.alavesa.labra;
 
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Bukkit;
+import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.World;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.block.Block;
@@ -47,11 +52,23 @@ public final class FireManager implements Listener, Runnable {
     private static final long FIRE_LIFETIME_MS = 30L * 60L * 1000L;   // 30 minutes
     private static final String TAG_MOUNT = "lab.extmount";
     private static final String TAG_MOUNT_CAN = "lab.extmount.can";
+    private static final String TAG_SPRINK_BTN = "lab.sprinkbtn";
+
+    private static final long SPRINKLER_MS = 30_000;          // a burst runs 30 seconds
+    private static final long SPRINKLER_COOLDOWN_MS = 300_000; // 5-minute cooldown per button
+    private static final int MOUNT_REFILL_STEP = LabRegistry.EXTINGUISHER_MAX / 10; // 10% per tick
+    private static final int NOXIOUS_FIRE_THRESHOLD = 8;      // fire blocks near a player before smoke bites
+    private static final int NOXIOUS_RADIUS = 4;
 
     private final LabraPlugin plugin;
     private final LabRegistry registry;
     private final Map<String, Long> fires = new HashMap<>();   // block key -> ignite time
     private final Map<UUID, Long> sprayCd = new HashMap<>();
+    /** Admin currently wiring a button: their UUID -> the button entity being linked. */
+    private final Map<UUID, UUID> pendingLink = new HashMap<>();
+    /** Seconds each player has been breathing smoke (drives the escalating harm). */
+    private final Map<UUID, Integer> smoke = new HashMap<>();
+    private static final int SMOKE_DYING_AFTER = 8;   // seconds of smoke before it starts to kill
 
     public FireManager(LabraPlugin plugin, LabRegistry registry) {
         this.plugin = plugin;
@@ -93,6 +110,53 @@ public final class FireManager implements Listener, Runnable {
             return w.getBlockAt(Integer.parseInt(p[1]), Integer.parseInt(p[2]), Integer.parseInt(p[3]))
                 .getType() != Material.FIRE;
         });
+    }
+
+    /** Fire never eats blocks: it burns for its 30 minutes but the facility is left
+     *  standing. (It's the smoke that's dangerous, not the structural damage.) */
+    @EventHandler
+    public void onBurn(org.bukkit.event.block.BlockBurnEvent event) {
+        event.setCancelled(true);
+    }
+
+    // ------------------------------------------------------------- noxious smoke
+
+    /** Too much fire nearby and the smoke gets to you - nausea and a stumble at
+     *  first, then it starts to kill the longer you breathe it. A gas mask
+     *  (a worn carved-pumpkin) filters it out entirely. Scheduled every second. */
+    public void noxiousTick() {
+        for (Player p : plugin.getServer().getOnlinePlayers()) {
+            UUID id = p.getUniqueId();
+            if (p.getGameMode() != GameMode.SURVIVAL && p.getGameMode() != GameMode.ADVENTURE) {
+                smoke.remove(id);
+                continue;
+            }
+            if (registry.isGasMask(p.getInventory().getHelmet())) { smoke.put(id, 0); continue; }
+            int fire = countFire(p.getLocation(), NOXIOUS_RADIUS);
+            if (fire < NOXIOUS_FIRE_THRESHOLD) {
+                int s = smoke.getOrDefault(id, 0);
+                if (s > 0) smoke.put(id, Math.max(0, s - 2));   // fresh air clears it faster than it built
+                continue;
+            }
+            int exposure = smoke.getOrDefault(id, 0) + 1;
+            smoke.put(id, exposure);
+            int sev = Math.min(3, (fire - NOXIOUS_FIRE_THRESHOLD) / 8);
+            p.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, 100, 0, true, false, false));
+            p.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, 40, sev, true, false, false));
+            p.sendActionBar(Component.text("You inhale the smoke.", NamedTextColor.GRAY, TextDecoration.ITALIC));
+            if (exposure > SMOKE_DYING_AFTER) {
+                p.damage(1.0 + Math.min(3.0, (exposure - SMOKE_DYING_AFTER) / 4.0));   // choking, escalating
+            }
+        }
+    }
+
+    private int countFire(Location center, int r) {
+        int count = 0;
+        Block base = center.getBlock();
+        for (int x = -r; x <= r; x++) for (int y = -r; y <= r; y++) for (int z = -r; z <= r; z++) {
+            if (base.getRelative(x, y, z).getType() == Material.FIRE && ++count > 250) return count;
+        }
+        return count;
     }
 
     // ------------------------------------------------------------- spraying
@@ -157,31 +221,111 @@ public final class FireManager implements Listener, Runnable {
 
     // ------------------------------------------------------- ceiling sprinklers
 
-    private final Map<String, Long> sprinklers = new HashMap<>();   // block key -> active until
-    private static final long SPRINKLER_MS = 15_000;                // a burst runs 15 seconds
-    private static final int SPRINKLER_RADIUS = 8;                  // a button wakes sprinklers this near
+    private final Map<String, Long> sprinklers = new HashMap<>();   // sprinkler block key -> active until
 
-    /** A button press wakes every hanging-roots sprinkler in the room. (Sprinklers ARE
-     *  hanging_roots blocks - re-textured in the pack - so any button in the room is a
-     *  fire-alarm pull.) */
-    @EventHandler
-    public void onButton(PlayerInteractEvent event) {
-        if (event.getAction() != org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK) return;
-        Block b = event.getClickedBlock();
-        if (b == null || !org.bukkit.Tag.BUTTONS.isTagged(b.getType())) return;
-        long until = System.currentTimeMillis() + SPRINKLER_MS;
-        int found = 0;
-        int r = SPRINKLER_RADIUS;
-        for (int x = -r; x <= r; x++) for (int y = -r; y <= r; y++) for (int z = -r; z <= r; z++) {
-            Block bl = b.getRelative(x, y, z);
-            if (bl.getType() == Material.HANGING_ROOTS) { sprinklers.put(key(bl), until); found++; }
+    /** Place a custom sprinkler-control button on the wall you're looking at; it also
+     *  becomes your active button for linking. */
+    public boolean placeSprinklerButton(Player player) {
+        RayTraceResult ray = player.getWorld().rayTraceBlocks(player.getEyeLocation(),
+            player.getEyeLocation().getDirection(), 5.0);
+        if (ray == null || ray.getHitBlock() == null || ray.getHitBlockFace() == null) return false;
+        var face = ray.getHitBlockFace();
+        Location at = ray.getHitBlock().getRelative(face).getLocation().add(0.5, 0.5, 0.5);
+        float yaw = switch (face) {
+            case NORTH -> 180f; case SOUTH -> 0f; case WEST -> 90f; case EAST -> -90f; default -> player.getYaw();
+        };
+        at.setYaw(yaw);
+        ItemDisplay disp = at.getWorld().spawn(at, ItemDisplay.class, d -> {
+            d.setItemStack(registry.buildSprinklerButtonItem());
+            d.addScoreboardTag(TAG_SPRINK_BTN);
+            d.setBillboard(org.bukkit.entity.Display.Billboard.FIXED);
+            d.setTransformation(new Transformation(new Vector3f(0, 0, 0),
+                new AxisAngle4f((float) Math.toRadians(-yaw), 0, 1, 0),
+                new Vector3f(0.6f, 0.6f, 0.6f), new AxisAngle4f()));
+        });
+        Interaction btn = at.getWorld().spawn(at.clone().subtract(0, 0.3, 0), Interaction.class, i -> {
+            i.addScoreboardTag(TAG_SPRINK_BTN);
+            i.setInteractionWidth(0.6f);
+            i.setInteractionHeight(0.6f);
+            i.getPersistentDataContainer().set(plugin.keyOf("sprink_disp"),
+                PersistentDataType.STRING, disp.getUniqueId().toString());
+        });
+        pendingLink.put(player.getUniqueId(), btn.getUniqueId());
+        return true;
+    }
+
+    /** Aim at an existing button to make it your active one for linking. */
+    public boolean selectSprinklerButton(Player player) {
+        Interaction btn = raytraceTagged(player, TAG_SPRINK_BTN);
+        if (btn == null) return false;
+        pendingLink.put(player.getUniqueId(), btn.getUniqueId());
+        return true;
+    }
+
+    /** Link the hanging_roots sprinkler you're looking at to your active button. */
+    public String linkSprinkler(Player player) {
+        UUID btnId = pendingLink.get(player.getUniqueId());
+        if (btnId == null) return "Place or select a button first: /lab sprinkler button | select.";
+        if (!(Bukkit.getEntity(btnId) instanceof Interaction btn)) return "Your active button is gone - select another.";
+        RayTraceResult ray = player.getWorld().rayTraceBlocks(player.getEyeLocation(),
+            player.getEyeLocation().getDirection(), 6.0);
+        if (ray == null || ray.getHitBlock() == null || ray.getHitBlock().getType() != Material.HANGING_ROOTS) {
+            return "Look at a hanging_roots sprinkler to link it.";
         }
-        if (found > 0) {
-            b.getWorld().playSound(b.getLocation(), Sound.BLOCK_BELL_USE, 1f, 1.4f);
-            for (Player p : b.getWorld().getPlayers()) {
-                if (p.getLocation().distanceSquared(b.getLocation()) < 400)
-                    p.sendActionBar(Component.text("Sprinklers activated.", NamedTextColor.AQUA));
-            }
+        String k = key(ray.getHitBlock());
+        var pdc = btn.getPersistentDataContainer();
+        String links = pdc.getOrDefault(plugin.keyOf("sprink_links"), PersistentDataType.STRING, "");
+        java.util.List<String> list = new java.util.ArrayList<>(java.util.Arrays.asList(
+            links.isEmpty() ? new String[0] : links.split(";")));
+        if (!list.contains(k)) list.add(k);
+        pdc.set(plugin.keyOf("sprink_links"), PersistentDataType.STRING, String.join(";", list));
+        return String.valueOf(list.size());   // success: returns the new link count
+    }
+
+    /** Remove the button (display + interaction) you're looking at. */
+    public boolean removeSprinklerButton(Player player) {
+        Interaction btn = raytraceTagged(player, TAG_SPRINK_BTN);
+        if (btn == null) return false;
+        String dispId = btn.getPersistentDataContainer().get(plugin.keyOf("sprink_disp"), PersistentDataType.STRING);
+        if (dispId != null && Bukkit.getEntity(UUID.fromString(dispId)) != null) {
+            Bukkit.getEntity(UUID.fromString(dispId)).remove();
+        }
+        btn.remove();
+        return true;
+    }
+
+    private Interaction raytraceTagged(Player player, String tag) {
+        RayTraceResult ray = player.getWorld().rayTraceEntities(player.getEyeLocation(),
+            player.getEyeLocation().getDirection(), 5.0, 0.3,
+            e -> e instanceof Interaction && e.getScoreboardTags().contains(tag));
+        return ray != null && ray.getHitEntity() instanceof Interaction i ? i : null;
+    }
+
+    /** Right-click the button: fire its linked sprinklers for 30s, then a 5-min cooldown. */
+    private void pressSprinklerButton(Interaction btn, Player player) {
+        var pdc = btn.getPersistentDataContainer();
+        long now = System.currentTimeMillis();
+        long cdUntil = pdc.getOrDefault(plugin.keyOf("sprink_cd"), PersistentDataType.LONG, 0L);
+        if (now < cdUntil) {
+            player.sendActionBar(Component.text("Sprinklers recharging - " + ((cdUntil - now) / 1000) + "s left",
+                NamedTextColor.GRAY));
+            player.playSound(player.getLocation(), Sound.BLOCK_DISPENSER_FAIL, 0.7f, 1.2f);
+            return;
+        }
+        String links = pdc.getOrDefault(plugin.keyOf("sprink_links"), PersistentDataType.STRING, "");
+        if (links.isEmpty()) {
+            player.sendActionBar(Component.text("No sprinklers linked. /lab sprinkler link while aiming at them.",
+                NamedTextColor.GRAY));
+            return;
+        }
+        long until = now + SPRINKLER_MS;
+        int n = 0;
+        for (String k : links.split(";")) if (!k.isEmpty()) { sprinklers.put(k, until); n++; }
+        pdc.set(plugin.keyOf("sprink_cd"), PersistentDataType.LONG, now + SPRINKLER_COOLDOWN_MS);
+        btn.getWorld().playSound(btn.getLocation(), Sound.BLOCK_BELL_USE, 1f, 1.4f);
+        for (Player p : btn.getWorld().getPlayers()) {
+            if (p.getLocation().distanceSquared(btn.getLocation()) < 900)
+                p.sendActionBar(Component.text("Sprinklers activated (" + n + ").", NamedTextColor.AQUA));
         }
     }
 
@@ -243,7 +387,8 @@ public final class FireManager implements Listener, Runnable {
             i.addScoreboardTag(TAG_MOUNT);
             i.setInteractionWidth(0.6f);
             i.setInteractionHeight(0.7f);
-            i.getPersistentDataContainer().set(plugin.keyOf("mount_full"), PersistentDataType.BYTE, (byte) 1);
+            i.getPersistentDataContainer().set(plugin.keyOf("mount_charge"),
+                PersistentDataType.INTEGER, LabRegistry.EXTINGUISHER_MAX);
             i.getPersistentDataContainer().set(plugin.keyOf("mount_display"), PersistentDataType.STRING,
                 bracket.getUniqueId().toString());
         });
@@ -268,32 +413,53 @@ public final class FireManager implements Listener, Runnable {
     @EventHandler
     public void onMountClick(PlayerInteractEntityEvent event) {
         if (event.getHand() != EquipmentSlot.HAND) return;
-        if (!(event.getRightClicked() instanceof Interaction mount)) return;
-        if (!mount.getScoreboardTags().contains(TAG_MOUNT)) return;
-        event.setCancelled(true);
+        if (!(event.getRightClicked() instanceof Interaction interaction)) return;
+        var tags = interaction.getScoreboardTags();
         Player player = event.getPlayer();
-        var pdc = mount.getPersistentDataContainer();
-        boolean full = pdc.getOrDefault(plugin.keyOf("mount_full"), PersistentDataType.BYTE, (byte) 0) == 1;
+        if (tags.contains(TAG_SPRINK_BTN)) {
+            event.setCancelled(true);
+            pressSprinklerButton(interaction, player);
+            return;
+        }
+        if (!tags.contains(TAG_MOUNT)) return;
+        event.setCancelled(true);
+        var pdc = interaction.getPersistentDataContainer();
+        // -1 = empty; 0..MAX = a docked extinguisher's current charge.
+        int charge = pdc.getOrDefault(plugin.keyOf("mount_charge"), PersistentDataType.INTEGER, -1);
 
-        if (full) {
-            // take it out
-            player.getInventory().addItem(registry.buildExtinguisher()).values()
+        if (charge >= 0) {
+            // take it out - with whatever charge the mount refilled it to
+            ItemStack ext = registry.buildExtinguisher();
+            registry.setExtinguisherCharge(ext, charge);
+            player.getInventory().addItem(ext).values()
                 .forEach(left -> player.getWorld().dropItemNaturally(player.getLocation(), left));
-            pdc.set(plugin.keyOf("mount_full"), PersistentDataType.BYTE, (byte) 0);
-            removeCanistersNear(mount.getLocation());
-            player.getWorld().playSound(mount.getLocation(), Sound.ITEM_ARMOR_EQUIP_LEATHER, 0.7f, 1.2f);
+            pdc.set(plugin.keyOf("mount_charge"), PersistentDataType.INTEGER, -1);
+            removeCanistersNear(interaction.getLocation());
+            player.getWorld().playSound(interaction.getLocation(), Sound.ITEM_ARMOR_EQUIP_LEATHER, 0.7f, 1.2f);
         } else {
-            // put one back
             ItemStack held = player.getInventory().getItemInMainHand();
             if (!registry.isExtinguisher(held)) {
                 player.sendActionBar(Component.text("Hold an extinguisher to slot it in.", NamedTextColor.GRAY));
                 return;
             }
+            pdc.set(plugin.keyOf("mount_charge"), PersistentDataType.INTEGER, registry.extinguisherCharge(held));
             held.setAmount(held.getAmount() - 1);
-            pdc.set(plugin.keyOf("mount_full"), PersistentDataType.BYTE, (byte) 1);
-            float yaw = mount.getLocation().getYaw();
-            showCanister(mount.getLocation(), yaw, true);
-            player.getWorld().playSound(mount.getLocation(), Sound.ITEM_ARMOR_EQUIP_LEATHER, 0.7f, 0.9f);
+            showCanister(interaction.getLocation(), interaction.getLocation().getYaw(), true);
+            player.getWorld().playSound(interaction.getLocation(), Sound.ITEM_ARMOR_EQUIP_LEATHER, 0.7f, 0.9f);
+        }
+    }
+
+    /** Slowly recharge docked extinguishers: +10% of a full tank per call (10s). */
+    public void refillMounts() {
+        for (World w : plugin.getServer().getWorlds()) {
+            for (Interaction i : w.getEntitiesByClass(Interaction.class)) {
+                if (!i.getScoreboardTags().contains(TAG_MOUNT)) continue;
+                var pdc = i.getPersistentDataContainer();
+                int charge = pdc.getOrDefault(plugin.keyOf("mount_charge"), PersistentDataType.INTEGER, -1);
+                if (charge < 0 || charge >= LabRegistry.EXTINGUISHER_MAX) continue;   // empty or already full
+                pdc.set(plugin.keyOf("mount_charge"), PersistentDataType.INTEGER,
+                    Math.min(LabRegistry.EXTINGUISHER_MAX, charge + MOUNT_REFILL_STEP));
+            }
         }
     }
 
