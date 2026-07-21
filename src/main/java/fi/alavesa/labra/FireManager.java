@@ -136,7 +136,23 @@ public final class FireManager implements Listener, Runnable {
         Player p = event.getPlayer();
         p.setFireTicks(Math.max(p.getFireTicks(), 60));
         p.getWorld().playSound(p.getLocation(), Sound.ITEM_FIRECHARGE_USE, 0.8f, 1.2f);
-        p.sendActionBar(Component.text("The fire's too big to smother by hand.", NamedTextColor.RED));
+        // Through the ActionBars hub so it composes with the meters instead of flickering.
+        ActionBars.message(p, Component.text("You were unable to put out the fire", NamedTextColor.GRAY));
+    }
+
+    /** Paint the worn gas-mask's first-person overlay (per tier) via the hub, so the
+     *  three masks look different and the overlay composes with the meters/messages
+     *  instead of the vanilla pumpkin blur (now cleared). Scheduled every few ticks. */
+    public void maskTick() {
+        for (Player p : plugin.getServer().getOnlinePlayers()) {
+            String tier = registry.gasMaskTier(p.getInventory().getHelmet());
+            if (tier == null) { ActionBars.clearMask(p); continue; }
+            char ch = switch (tier) { case "super" -> ''; case "heavy" -> ''; default -> ''; };
+            Component glyph = Component.text(String.valueOf(ch))
+                .font(net.kyori.adventure.key.Key.key("lab", "gasmask"))
+                .color(NamedTextColor.WHITE);
+            ActionBars.mask(p, glyph, 1024);
+        }
     }
 
     /** How many of the 26 surrounding blocks are also fire. */

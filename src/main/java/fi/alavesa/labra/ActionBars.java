@@ -42,10 +42,16 @@ public final class ActionBars {
      *  down to the XP-bar row. Re-sent every tick by the HUD, so it's short-lived. */
     private record Meters(Component line, int width, int leftShift, long until) { }
 
+    /** A full-screen gas-mask overlay glyph, centered, composed with everything else
+     *  so it never flickers with the meters/messages. Re-sent while the mask is worn. */
+    private record Mask(Component glyph, int width, long until) { }
+
     private static final Map<UUID, State> STATES = new ConcurrentHashMap<>();
     private static final Map<UUID, Meters> METERS = new ConcurrentHashMap<>();
+    private static final Map<UUID, Mask> MASKS = new ConcurrentHashMap<>();
     private static final long TRANSIENT_MS = 4000;
     private static final long METERS_MS = 500;
+    private static final long MASK_MS = 500;
     /** The top line goes stale fast: its owner (the speedometer) re-sends it
      *  every tick while it's relevant, so it disappears within a couple of
      *  ticks of the driver letting go instead of lingering for seconds. */
@@ -69,7 +75,12 @@ public final class ActionBars {
                     METERS.remove(player.getUniqueId());
                     meters = null;
                 }
-                if (state == null && meters == null) continue;
+                Mask mask = MASKS.get(player.getUniqueId());
+                if (mask != null && mask.until() < now) {
+                    MASKS.remove(player.getUniqueId());
+                    mask = null;
+                }
+                if (state == null && meters == null && mask == null) continue;
                 render(player);
             }
         }, 40L, 10L);
@@ -141,11 +152,25 @@ public final class ActionBars {
         METERS.remove(player.getUniqueId());
     }
 
+    /** The worn gas-mask overlay: {@code glyph} is a lab:gasmask char (its ascent/
+     *  height make it fill the screen); {@code width} is its rendered pixel advance.
+     *  Re-send every tick while the mask is on; it centers and composes with the rest. */
+    public static void mask(Player player, Component glyph, int width) {
+        MASKS.put(player.getUniqueId(), new Mask(glyph, width, System.currentTimeMillis() + MASK_MS));
+        render(player);
+    }
+
+    public static void clearMask(Player player) {
+        MASKS.remove(player.getUniqueId());
+    }
+
     private static void render(Player player) {
         long now = System.currentTimeMillis();
         State state = STATES.get(player.getUniqueId());
         Meters meters = METERS.get(player.getUniqueId());
+        Mask mask = MASKS.get(player.getUniqueId());
         boolean metersLive = meters != null && meters.until() >= now;
+        boolean maskLive = mask != null && mask.until() >= now;
 
         // --- build the centered "base" (top/transient text + persistent bar) ---
         Component base = null;
@@ -171,27 +196,31 @@ public final class ActionBars {
             }
         }
 
-        if (!metersLive) {
+        if (!metersLive && !maskLive) {
             if (base != null) player.sendActionBar(base);
             return;
         }
 
-        // --- left-anchor the meters, keeping any base dead-centered ---
-        int shift = meters.leftShift();
-        int m = meters.width();
-        if (base == null || baseWidth == 0) {
-            // meters own the line: total advance 2*shift -> drawn from -shift,
-            // so the meters' left edge lands 'shift' px left of screen centre.
-            player.sendActionBar(meters.line().append(advance(2 * shift - m)));
-        } else {
-            // append with a net-zero advance so 'base' still centers on baseWidth,
-            // while the meters are placed 'shift' px left of centre, below-line.
-            base = base
-                .append(advance(-shift - baseWidth / 2))
-                .append(meters.line())
-                .append(advance(shift + baseWidth / 2 - m));
-            player.sendActionBar(base);
+        // A single line carries everything. Pick a total advance T that the client
+        // centers on: the base's width if there is one, else the mask's, else the
+        // meters'. Then append the meters (left-anchored) and mask (centered) with
+        // net-zero advances so they sit where they should without disturbing T.
+        int T = base != null ? baseWidth : (maskLive ? mask.width() : 2 * meters.leftShift());
+        if (T <= 0) T = maskLive ? mask.width() : 2 * meters.leftShift();
+        Component out = base != null ? base : advance(T);   // an invisible T-wide spacer sets the centering
+
+        if (metersLive) {
+            int shift = meters.leftShift();
+            int m = meters.width();
+            out = out.append(advance(-shift - T / 2)).append(meters.line())
+                     .append(advance(shift + T / 2 - m));
         }
+        if (maskLive) {
+            int w = mask.width();
+            out = out.append(advance(-w / 2 - T / 2)).append(mask.glyph())
+                     .append(advance(T / 2 - w / 2));
+        }
+        player.sendActionBar(out);
     }
 
     /** Compose any pixel offset from the hud font's power-of-two spaces. */

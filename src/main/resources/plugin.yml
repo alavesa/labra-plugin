@@ -1,5 +1,5 @@
 name: Labra
-version: '0.21.16'
+version: '0.21.17'
 main: fi.alavesa.labra.LabraPlugin
 api-version: '1.21'
 description: Lab equipment - hazard zones, hazmat suits, geiger counter.
