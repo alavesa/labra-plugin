@@ -151,17 +151,31 @@ public final class FireManager implements Listener, Runnable {
             Component glyph = Component.text(String.valueOf(ch))
                 .font(net.kyori.adventure.key.Key.key("lab", "gasmask"))
                 .color(NamedTextColor.WHITE);
-            ActionBars.mask(p, glyph, 1024);
+            showTitleGlyph(p, glyph);
         }
     }
 
-    /** The worn NVG's per-type overlay (green/red/blue), or clear the mask slot. */
+    private final java.util.Set<UUID> overlayShown = new java.util.HashSet<>();
+
+    /** The full-screen headgear overlay, painted as a TITLE (a title renders big
+     *  centered glyphs where the actionbar wouldn't). Re-sent while worn. */
+    private void showTitleGlyph(Player p, Component glyph) {
+        overlayShown.add(p.getUniqueId());
+        p.showTitle(net.kyori.adventure.title.Title.title(glyph, Component.empty(),
+            net.kyori.adventure.title.Title.Times.times(
+                java.time.Duration.ZERO, java.time.Duration.ofMillis(1500), java.time.Duration.ZERO)));
+    }
+
+    /** The worn NVG's per-type overlay (green/red/blue), or clear our overlay title. */
     private void nvgOverlay(Player p) {
         String nvg = registry.nvgType(p.getInventory().getHelmet());
-        if (nvg == null) { ActionBars.clearMask(p); return; }
+        if (nvg == null) {
+            if (overlayShown.remove(p.getUniqueId())) p.clearTitle();
+            return;
+        }
         char ch = switch (nvg) { case "red" -> ''; case "blue" -> ''; default -> ''; };
-        ActionBars.mask(p, Component.text(String.valueOf(ch))
-            .font(net.kyori.adventure.key.Key.key("lab", "nvg")).color(NamedTextColor.WHITE), 1024);
+        showTitleGlyph(p, Component.text(String.valueOf(ch))
+            .font(net.kyori.adventure.key.Key.key("lab", "nvg")).color(NamedTextColor.WHITE));
     }
 
     /** How many of the 26 surrounding blocks are also fire. */
