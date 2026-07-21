@@ -77,7 +77,13 @@ public final class LabMenu implements Listener {
             new G("scp018", Material.EGG, "SCP-018 Super Ball"),
             new G("scp427", Material.HEART_OF_THE_SEA, "SCP-427 Talisman"),
             new G("scp1033", Material.CLOCK, "SCP-1033-RU Bracelet"),
-            new G("nvg", Material.CARVED_PUMPKIN, "Night Vision Goggles"),
+            new G("extinguisher", Material.FIRE_CHARGE, "Fire Extinguisher"),
+            new G("gasmask", Material.LEATHER_HELMET, "Gas Mask"),
+            new G("supergasmask", Material.LEATHER_HELMET, "Super Gas Mask (infinite stamina)"),
+            new G("heavygasmask", Material.LEATHER_HELMET, "Heavy Gas Mask (memetic immunity)"),
+            new G("nvg", Material.CARVED_PUMPKIN, "NVG - Green (battery)"),
+            new G("nvgred", Material.CARVED_PUMPKIN, "NVG - Red (infinite battery)"),
+            new G("nvgblue", Material.CARVED_PUMPKIN, "NVG - Blue (see SCPs through walls)"),
             new G("ziptie", Material.STRING, "Zipties"),
             new G("battery", Material.COPPER_INGOT, "9V Battery"),
             new G("medkit", Material.BRICK, "Medkit"),
@@ -116,6 +122,11 @@ public final class LabMenu implements Listener {
             "terminal cctv place", null));
         list.add(new Entry(Material.RECOVERY_COMPASS, "CCTV Monitor", NamedTextColor.AQUA,
             "terminal cctv monitor", null));
+        // --- fire-safety fixtures (aim at a wall, then click)
+        list.add(new Entry(Material.ITEM_FRAME, "Place: Extinguisher wall mount", NamedTextColor.YELLOW,
+            "lab extinguisher mount", null));
+        list.add(new Entry(Material.LEVER, "Place: Sprinkler button", NamedTextColor.YELLOW,
+            "lab sprinkler button", null));
         // --- placeable machines
         for (String machine : List.of("creator", "burner", "centrifuge", "fridge",
             "rack", "scp294", "scp038")) {

@@ -142,12 +142,10 @@ public final class LabRegistry {
         };
         ItemStack item = new ItemStack(Material.LEATHER_HELMET);
         ItemMeta meta = item.getItemMeta();
-        String name = switch (t) {
-            case "super" -> "Super Gas Mask";
-            case "heavy" -> "Heavy Gas Mask";
-            default -> "Gas Mask";
-        };
-        meta.itemName(Component.text(name, NamedTextColor.GREEN).decoration(TextDecoration.ITALIC, false));
+        // Every tier is deliberately INDISTINGUISHABLE: same name, same model. The
+        // tier lives only in the hidden PDC below, so no one can tell a heavy/super
+        // mask from a plain one by looking at it.
+        meta.itemName(Component.text("Gas Mask", NamedTextColor.GREEN).decoration(TextDecoration.ITALIC, false));
         CustomModelDataComponent cmd = meta.getCustomModelDataComponent();
         cmd.setStrings(List.of("lab_gasmask"));   // identical model for every tier
         meta.setCustomModelDataComponent(cmd);
