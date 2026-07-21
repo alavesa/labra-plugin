@@ -61,7 +61,11 @@ public final class LabRegistry {
         this.extinguisherKey = new NamespacedKey(plugin, "extinguisher");
     }
 
-    /** The held fire extinguisher: right-click sprays and puts out fire. */
+    /** How many sprays a full extinguisher holds. */
+    public static final int EXTINGUISHER_MAX = 40;
+    private final NamespacedKey chargeKey = new NamespacedKey("labra", "ext_charge");
+
+    /** The held fire extinguisher: right-click sprays and puts out fire. Full. */
     public ItemStack buildExtinguisher() {
         ItemStack item = new ItemStack(Material.BRICK);
         ItemMeta meta = item.getItemMeta();
@@ -71,8 +75,34 @@ public final class LabRegistry {
         cmd.setStrings(List.of("lab_extinguisher"));
         meta.setCustomModelDataComponent(cmd);
         meta.getPersistentDataContainer().set(extinguisherKey, PersistentDataType.BYTE, (byte) 1);
+        meta.getPersistentDataContainer().set(chargeKey, PersistentDataType.INTEGER, EXTINGUISHER_MAX);
         item.setItemMeta(meta);
+        chargeLore(item, EXTINGUISHER_MAX);
         return item;
+    }
+
+    public int extinguisherCharge(ItemStack item) {
+        if (item == null || !item.hasItemMeta()) return 0;
+        return item.getItemMeta().getPersistentDataContainer()
+            .getOrDefault(chargeKey, PersistentDataType.INTEGER, 0);
+    }
+
+    /** Set the item's remaining charge and refresh its lore/durability bar. */
+    public void setExtinguisherCharge(ItemStack item, int charge) {
+        if (item == null || !item.hasItemMeta()) return;
+        int c = Math.max(0, Math.min(EXTINGUISHER_MAX, charge));
+        ItemMeta meta = item.getItemMeta();
+        meta.getPersistentDataContainer().set(chargeKey, PersistentDataType.INTEGER, c);
+        item.setItemMeta(meta);
+        chargeLore(item, c);
+    }
+
+    private void chargeLore(ItemStack item, int charge) {
+        ItemMeta meta = item.getItemMeta();
+        int pct = Math.round(charge / (float) EXTINGUISHER_MAX * 100);
+        NamedTextColor col = pct > 50 ? NamedTextColor.GREEN : pct > 20 ? NamedTextColor.YELLOW : NamedTextColor.RED;
+        meta.lore(List.of(Component.text("Charge: " + pct + "%", col).decoration(TextDecoration.ITALIC, false)));
+        item.setItemMeta(meta);
     }
 
     /** The item shown on a wall mount (the extinguisher, cradled). */

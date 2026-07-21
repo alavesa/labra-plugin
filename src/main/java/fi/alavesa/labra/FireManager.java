@@ -104,13 +104,24 @@ public final class FireManager implements Listener, Runnable {
         if (a != org.bukkit.event.block.Action.RIGHT_CLICK_AIR
             && a != org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK) return;
         Player player = event.getPlayer();
-        if (!registry.isExtinguisher(player.getInventory().getItemInMainHand())) return;
+        ItemStack held = player.getInventory().getItemInMainHand();
+        if (!registry.isExtinguisher(held)) return;
         event.setCancelled(true);   // no vanilla brick placement
         long now = System.currentTimeMillis();
         Long until = sprayCd.get(player.getUniqueId());
         if (until != null && now < until) return;
         sprayCd.put(player.getUniqueId(), now + 120);
+
+        int charge = registry.extinguisherCharge(held);
+        if (charge <= 0) {
+            player.playSound(player.getLocation(), Sound.BLOCK_DISPENSER_FAIL, 0.7f, 1.4f);
+            player.sendActionBar(Component.text("The extinguisher is empty.", NamedTextColor.GRAY));
+            return;
+        }
+        registry.setExtinguisherCharge(held, charge - 1);
         spray(player);
+        player.sendActionBar(Component.text("Extinguisher charge: "
+            + Math.round((charge - 1) / (float) LabRegistry.EXTINGUISHER_MAX * 100) + "%", NamedTextColor.GRAY));
     }
 
     private void spray(Player player) {
@@ -144,6 +155,63 @@ public final class FireManager implements Listener, Runnable {
         }
     }
 
+    // ------------------------------------------------------- ceiling sprinklers
+
+    private final Map<String, Long> sprinklers = new HashMap<>();   // block key -> active until
+    private static final long SPRINKLER_MS = 15_000;                // a burst runs 15 seconds
+    private static final int SPRINKLER_RADIUS = 8;                  // a button wakes sprinklers this near
+
+    /** A button press wakes every hanging-roots sprinkler in the room. (Sprinklers ARE
+     *  hanging_roots blocks - re-textured in the pack - so any button in the room is a
+     *  fire-alarm pull.) */
+    @EventHandler
+    public void onButton(PlayerInteractEvent event) {
+        if (event.getAction() != org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK) return;
+        Block b = event.getClickedBlock();
+        if (b == null || !org.bukkit.Tag.BUTTONS.isTagged(b.getType())) return;
+        long until = System.currentTimeMillis() + SPRINKLER_MS;
+        int found = 0;
+        int r = SPRINKLER_RADIUS;
+        for (int x = -r; x <= r; x++) for (int y = -r; y <= r; y++) for (int z = -r; z <= r; z++) {
+            Block bl = b.getRelative(x, y, z);
+            if (bl.getType() == Material.HANGING_ROOTS) { sprinklers.put(key(bl), until); found++; }
+        }
+        if (found > 0) {
+            b.getWorld().playSound(b.getLocation(), Sound.BLOCK_BELL_USE, 1f, 1.4f);
+            for (Player p : b.getWorld().getPlayers()) {
+                if (p.getLocation().distanceSquared(b.getLocation()) < 400)
+                    p.sendActionBar(Component.text("Sprinklers activated.", NamedTextColor.AQUA));
+            }
+        }
+    }
+
+    /** Scheduled: active sprinklers rain down, clearing fire and dousing anyone burning. */
+    public void sprinklerTick() {
+        if (sprinklers.isEmpty()) return;
+        long now = System.currentTimeMillis();
+        var it = sprinklers.entrySet().iterator();
+        while (it.hasNext()) {
+            var e = it.next();
+            if (now > e.getValue()) { it.remove(); continue; }
+            String[] p = e.getKey().split(":");
+            var w = Bukkit.getWorld(p[0]);
+            if (w == null) { it.remove(); continue; }
+            Block b = w.getBlockAt(Integer.parseInt(p[1]), Integer.parseInt(p[2]), Integer.parseInt(p[3]));
+            if (b.getType() != Material.HANGING_ROOTS) { it.remove(); continue; }
+            Location spout = b.getLocation().add(0.5, 0, 0.5);
+            w.spawnParticle(Particle.FALLING_WATER, spout.clone().subtract(0, 0.2, 0), 8, 0.3, 0.1, 0.3, 0);
+            w.spawnParticle(Particle.SPLASH, spout.clone().subtract(0, 1.2, 0), 4, 0.25, 0.1, 0.25, 0);
+            // clear fire in the column below (down to the floor), and any that spread nearby
+            for (int dy = 0; dy <= 10; dy++) for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++) {
+                Block below = b.getRelative(dx, -dy, dz);
+                if (below.getType() == Material.FIRE) { below.setType(Material.AIR); fires.remove(key(below)); }
+            }
+            for (var ent : w.getNearbyEntities(spout.clone().subtract(0, 4, 0), 2.5, 5, 2.5)) {
+                if (ent instanceof LivingEntity le && le.getFireTicks() > 0) le.setFireTicks(0);
+            }
+        }
+    }
+
     // -------------------------------------------------------------- mounts
 
     /** Place a wall mount where the player is looking, cradling one extinguisher. */
@@ -168,10 +236,13 @@ public final class FireManager implements Listener, Runnable {
                 new AxisAngle4f((float) Math.toRadians(-yaw), 0, 1, 0),
                 new Vector3f(1.0f, 1.0f, 1.0f), new AxisAngle4f()));
         });
-        at.getWorld().spawn(at, Interaction.class, i -> {
+        // The Interaction's position is the BOTTOM of its hitbox, so drop it half a
+        // height below the model's centre - otherwise the box floats above the
+        // canister (which is what made the hitbox sit too high).
+        at.getWorld().spawn(at.clone().subtract(0, 0.35, 0), Interaction.class, i -> {
             i.addScoreboardTag(TAG_MOUNT);
-            i.setInteractionWidth(0.7f);
-            i.setInteractionHeight(0.9f);
+            i.setInteractionWidth(0.6f);
+            i.setInteractionHeight(0.7f);
             i.getPersistentDataContainer().set(plugin.keyOf("mount_full"), PersistentDataType.BYTE, (byte) 1);
             i.getPersistentDataContainer().set(plugin.keyOf("mount_display"), PersistentDataType.STRING,
                 bracket.getUniqueId().toString());

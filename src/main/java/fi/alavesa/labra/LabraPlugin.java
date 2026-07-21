@@ -56,6 +56,7 @@ public final class LabraPlugin extends JavaPlugin {
         fire = new FireManager(this, registry);
         getServer().getPluginManager().registerEvents(fire, this);
         getServer().getScheduler().runTaskTimer(this, fire, 1200L, 1200L);   // fire housekeeping every minute
+        getServer().getScheduler().runTaskTimer(this, fire::sprinklerTick, 40L, 10L);   // active sprinklers
         Scp038Listener scp038 = new Scp038Listener(this);
         getServer().getPluginManager().registerEvents(scp038, this);
         getServer().getScheduler().runTaskTimer(this, scp038, 40L, 20L);
