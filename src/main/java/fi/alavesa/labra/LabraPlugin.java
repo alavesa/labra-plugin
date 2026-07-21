@@ -59,6 +59,8 @@ public final class LabraPlugin extends JavaPlugin {
         getServer().getScheduler().runTaskTimer(this, fire::sprinklerTick, 40L, 10L);   // active sprinklers
         getServer().getScheduler().runTaskTimer(this, fire::refillMounts, 200L, 200L);  // mounts refill 10%/10s
         getServer().getScheduler().runTaskTimer(this, fire::noxiousTick, 40L, 20L);      // smoke harm every second
+        getServer().getScheduler().runTaskTimer(this, fire::spreadTick, 40L, 6L);        // burning players trail fire
+        getServer().getScheduler().runTaskTimer(this, fire::ductSpreadTick, 60L, 40L);   // fire creeps through ducts
         Scp038Listener scp038 = new Scp038Listener(this);
         getServer().getPluginManager().registerEvents(scp038, this);
         getServer().getScheduler().runTaskTimer(this, scp038, 40L, 20L);

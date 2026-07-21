@@ -58,7 +58,7 @@ public final class FireManager implements Listener, Runnable {
     private static final long SPRINKLER_COOLDOWN_MS = 300_000; // 5-minute cooldown per button
     private static final int MOUNT_REFILL_STEP = LabRegistry.EXTINGUISHER_MAX / 10; // 10% per tick
     private static final int NOXIOUS_FIRE_THRESHOLD = 8;      // fire blocks near a player before smoke bites
-    private static final int NOXIOUS_RADIUS = 4;
+    private static final int NOXIOUS_RADIUS = 9;             // widest smoke reach (scales up with fire count)
 
     private final LabraPlugin plugin;
     private final LabRegistry registry;
@@ -69,6 +69,10 @@ public final class FireManager implements Listener, Runnable {
     /** Seconds each player has been breathing smoke (drives the escalating harm). */
     private final Map<UUID, Integer> smoke = new HashMap<>();
     private static final int SMOKE_DYING_AFTER = 8;   // seconds of smoke before it starts to kill
+    /** Last position of each player, for trailing fire when they're alight. */
+    private final Map<UUID, Location> lastPos = new HashMap<>();
+    private static final Material DUCT_LOG = Material.STRIPPED_PALE_OAK_LOG;   // vent openings (re-textured)
+    private static final Material DUCT_PIPE = Material.STRIPPED_PALE_OAK_WOOD; // vent piping (re-textured)
 
     public FireManager(LabraPlugin plugin, LabRegistry registry) {
         this.plugin = plugin;
@@ -119,6 +123,32 @@ public final class FireManager implements Listener, Runnable {
         event.setCancelled(true);
     }
 
+    /** You can pat out a lone flame, but a fire with other fire around it is too big
+     *  to smother by hand - try and it just catches YOU alight. */
+    @EventHandler
+    public void onFireBreak(org.bukkit.event.block.BlockBreakEvent event) {
+        if (event.getBlock().getType() != Material.FIRE) return;
+        if (adjacentFire(event.getBlock()) == 0) {
+            fires.remove(key(event.getBlock()));   // isolated single flame - let them smother it
+            return;
+        }
+        event.setCancelled(true);
+        Player p = event.getPlayer();
+        p.setFireTicks(Math.max(p.getFireTicks(), 60));
+        p.getWorld().playSound(p.getLocation(), Sound.ITEM_FIRECHARGE_USE, 0.8f, 1.2f);
+        p.sendActionBar(Component.text("The fire's too big to smother by hand.", NamedTextColor.RED));
+    }
+
+    /** How many of the 26 surrounding blocks are also fire. */
+    private int adjacentFire(Block b) {
+        int n = 0;
+        for (int x = -1; x <= 1; x++) for (int y = -1; y <= 1; y++) for (int z = -1; z <= 1; z++) {
+            if ((x | y | z) == 0) continue;
+            if (b.getRelative(x, y, z).getType() == Material.FIRE) n++;
+        }
+        return n;
+    }
+
     // ------------------------------------------------------------- noxious smoke
 
     /** Too much fire nearby and the smoke gets to you - nausea and a stumble at
@@ -132,15 +162,21 @@ public final class FireManager implements Listener, Runnable {
                 continue;
             }
             if (registry.isGasMask(p.getInventory().getHelmet())) { smoke.put(id, 0); continue; }
-            int fire = countFire(p.getLocation(), NOXIOUS_RADIUS);
-            if (fire < NOXIOUS_FIRE_THRESHOLD) {
+            // Count the fire around the player AND how near the closest flame is. The
+            // more fire there is, the further its smoke reaches - a wall of flame gasses
+            // you from across the room, a campfire only up close.
+            double[] scan = scanFire(p.getLocation(), NOXIOUS_RADIUS);
+            int fire = (int) scan[0];
+            double nearest = scan[1];
+            double smokeRadius = Math.min((double) NOXIOUS_RADIUS, 3.0 + fire / 3.0);
+            if (fire < NOXIOUS_FIRE_THRESHOLD || nearest > smokeRadius) {
                 int s = smoke.getOrDefault(id, 0);
                 if (s > 0) smoke.put(id, Math.max(0, s - 2));   // fresh air clears it faster than it built
                 continue;
             }
             int exposure = smoke.getOrDefault(id, 0) + 1;
             smoke.put(id, exposure);
-            int sev = Math.min(3, (fire - NOXIOUS_FIRE_THRESHOLD) / 8);
+            int sev = Math.min(3, fire / 12);
             p.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, 100, 0, true, false, false));
             p.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, 40, sev, true, false, false));
             p.sendActionBar(Component.text("You inhale the smoke.", NamedTextColor.GRAY, TextDecoration.ITALIC));
@@ -150,13 +186,105 @@ public final class FireManager implements Listener, Runnable {
         }
     }
 
-    private int countFire(Location center, int r) {
+    /** A player who's on fire trails flame as they run: touch a blaze, flee, and you
+     *  spread it behind you. Scheduled every few ticks. */
+    public void spreadTick() {
+        for (Player p : plugin.getServer().getOnlinePlayers()) {
+            UUID id = p.getUniqueId();
+            if (p.getFireTicks() <= 0 || p.getGameMode() == GameMode.SPECTATOR
+                    || p.getGameMode() == GameMode.CREATIVE) {
+                lastPos.remove(id);
+                continue;
+            }
+            Location prev = lastPos.get(id);
+            Location cur = p.getLocation();
+            lastPos.put(id, cur.clone());
+            if (prev == null || prev.getWorld() != cur.getWorld()) continue;
+            if (prev.distanceSquared(cur) < 0.4) continue;   // must actually be moving away
+            Block at = prev.getBlock();
+            Block floor = at.getRelative(0, -1, 0);
+            if (at.getType() == Material.AIR && floor.getType().isSolid()
+                    && java.util.concurrent.ThreadLocalRandom.current().nextInt(2) == 0) {
+                at.setType(Material.FIRE);
+                fires.put(key(at), System.currentTimeMillis());
+            }
+        }
+    }
+
+    /** Fire travels through the ventilation ducts: a flame touching a
+     *  stripped_pale_oak_log (a vent) creeps along the stripped_pale_oak_wood
+     *  piping to the other vents in the run and breaks out there. Scheduled slowly. */
+    public void ductSpreadTick() {
+        if (fires.isEmpty()) return;
+        var rng = java.util.concurrent.ThreadLocalRandom.current();
+        // pick a handful of live fires that sit against a duct vent this pass
+        java.util.List<Block> seeds = new java.util.ArrayList<>();
+        for (String k : fires.keySet()) {
+            String[] pr = k.split(":");
+            var w = Bukkit.getWorld(pr[0]);
+            if (w == null) continue;
+            Block f = w.getBlockAt(Integer.parseInt(pr[1]), Integer.parseInt(pr[2]), Integer.parseInt(pr[3]));
+            if (f.getType() != Material.FIRE) continue;
+            Block vent = adjacentDuctVent(f);
+            if (vent != null) seeds.add(vent);
+            if (seeds.size() >= 6) break;
+        }
+        for (Block vent : seeds) {
+            // walk the connected duct network (logs + wood pipes), bounded
+            java.util.Set<String> seen = new java.util.HashSet<>();
+            java.util.ArrayDeque<Block> queue = new java.util.ArrayDeque<>();
+            queue.add(vent); seen.add(key(vent));
+            int lit = 0;
+            while (!queue.isEmpty() && seen.size() < 48 && lit < 3) {
+                Block b = queue.poll();
+                if (b.getType() == DUCT_LOG) {
+                    // a vent opening - break fire out into an adjacent air pocket
+                    for (org.bukkit.block.BlockFace face : FACES) {
+                        Block air = b.getRelative(face);
+                        if (air.getType() == Material.AIR && rng.nextInt(3) == 0) {
+                            air.setType(Material.FIRE);
+                            fires.put(key(air), System.currentTimeMillis());
+                            lit++;
+                            break;
+                        }
+                    }
+                }
+                for (org.bukkit.block.BlockFace face : FACES) {
+                    Block nb = b.getRelative(face);
+                    if ((nb.getType() == DUCT_LOG || nb.getType() == DUCT_PIPE) && seen.add(key(nb))) {
+                        queue.add(nb);
+                    }
+                }
+            }
+        }
+    }
+
+    private static final org.bukkit.block.BlockFace[] FACES = {
+        org.bukkit.block.BlockFace.UP, org.bukkit.block.BlockFace.DOWN,
+        org.bukkit.block.BlockFace.NORTH, org.bukkit.block.BlockFace.SOUTH,
+        org.bukkit.block.BlockFace.EAST, org.bukkit.block.BlockFace.WEST };
+
+    private Block adjacentDuctVent(Block fire) {
+        for (org.bukkit.block.BlockFace face : FACES) {
+            Block b = fire.getRelative(face);
+            if (b.getType() == DUCT_LOG || b.getType() == DUCT_PIPE) return b;
+        }
+        return null;
+    }
+
+    /** {fire count, distance to the nearest flame} within r blocks. */
+    private double[] scanFire(Location center, int r) {
         int count = 0;
+        double nearest = Double.MAX_VALUE;
         Block base = center.getBlock();
         for (int x = -r; x <= r; x++) for (int y = -r; y <= r; y++) for (int z = -r; z <= r; z++) {
-            if (base.getRelative(x, y, z).getType() == Material.FIRE && ++count > 250) return count;
+            if (base.getRelative(x, y, z).getType() != Material.FIRE) continue;
+            count++;
+            double d = Math.sqrt(x * x + y * y + z * z);
+            if (d < nearest) nearest = d;
+            if (count > 300) return new double[]{count, nearest};
         }
-        return count;
+        return new double[]{count, nearest};
     }
 
     // ------------------------------------------------------------- spraying
@@ -343,14 +471,16 @@ public final class FireManager implements Listener, Runnable {
             Block b = w.getBlockAt(Integer.parseInt(p[1]), Integer.parseInt(p[2]), Integer.parseInt(p[3]));
             if (b.getType() != Material.HANGING_ROOTS) { it.remove(); continue; }
             Location spout = b.getLocation().add(0.5, 0, 0.5);
-            w.spawnParticle(Particle.FALLING_WATER, spout.clone().subtract(0, 0.2, 0), 8, 0.3, 0.1, 0.3, 0);
-            w.spawnParticle(Particle.SPLASH, spout.clone().subtract(0, 1.2, 0), 4, 0.25, 0.1, 0.25, 0);
-            // clear fire in the column below (down to the floor), and any that spread nearby
-            for (int dy = 0; dy <= 10; dy++) for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++) {
+            w.spawnParticle(Particle.FALLING_WATER, spout.clone().subtract(0, 0.2, 0), 14, 1.2, 0.1, 1.2, 0);
+            w.spawnParticle(Particle.SPLASH, spout.clone().subtract(0, 2.0, 0), 8, 1.4, 0.2, 1.4, 0);
+            // A wide cone below the sprinkler head so it doesn't miss spots: 7x7 across,
+            // all the way to the floor.
+            int rad = 3;
+            for (int dy = 0; dy <= 12; dy++) for (int dx = -rad; dx <= rad; dx++) for (int dz = -rad; dz <= rad; dz++) {
                 Block below = b.getRelative(dx, -dy, dz);
                 if (below.getType() == Material.FIRE) { below.setType(Material.AIR); fires.remove(key(below)); }
             }
-            for (var ent : w.getNearbyEntities(spout.clone().subtract(0, 4, 0), 2.5, 5, 2.5)) {
+            for (var ent : w.getNearbyEntities(spout.clone().subtract(0, 5, 0), 4.0, 6, 4.0)) {
                 if (ent instanceof LivingEntity le && le.getFireTicks() > 0) le.setFireTicks(0);
             }
         }
