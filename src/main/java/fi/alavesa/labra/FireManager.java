@@ -253,52 +253,153 @@ public final class FireManager implements Listener, Runnable {
         }
     }
 
-    /** Fire travels through the ventilation ducts: a flame touching a
-     *  stripped_pale_oak_log (a vent) creeps along the stripped_pale_oak_wood
-     *  piping to the other vents in the run and breaks out there. Scheduled slowly. */
+    // ---- fire spread: deliberately RARE so fires stay fightable ----
+    /** Per sampled fire per pass, the % chance it creeps ONE step further through the
+     *  vent network. Small on purpose: a fire that instantly fills every duct cover
+     *  can never be put out. */
+    private static final int DUCT_SPREAD_PERCENT = 3;
+    /** Per sampled fire per pass, the per-mille chance it jumps to an adjacent air
+     *  block resting against ANY solid block - so fire can spread on every block
+     *  type in the game, but only very occasionally. */
+    private static final int GENERAL_SPREAD_PERMILLE = 5;
+
+    /**
+     * Fire creeps - slowly, and only sometimes. Through the ventilation ducts a
+     * flame very occasionally breaks out at ONE other vent along the run, and any
+     * fire can rarely jump to an adjacent block of any type. Both are gated on low
+     * probabilities and light at most one new fire per sampled flame, so the fire
+     * stays possible to extinguish instead of flashing over everything at once.
+     */
     public void ductSpreadTick() {
         if (fires.isEmpty()) return;
         var rng = java.util.concurrent.ThreadLocalRandom.current();
-        // pick a handful of live fires that sit against a duct vent this pass
-        java.util.List<Block> seeds = new java.util.ArrayList<>();
-        for (String k : fires.keySet()) {
+        int checked = 0;
+        for (String k : new java.util.ArrayList<>(fires.keySet())) {
+            if (checked >= 24) break;   // bounded work per pass
             String[] pr = k.split(":");
             var w = Bukkit.getWorld(pr[0]);
             if (w == null) continue;
             Block f = w.getBlockAt(Integer.parseInt(pr[1]), Integer.parseInt(pr[2]), Integer.parseInt(pr[3]));
             if (f.getType() != Material.FIRE) continue;
-            Block vent = adjacentDuctVent(f);
-            if (vent != null) seeds.add(vent);
-            if (seeds.size() >= 6) break;
+            checked++;
+            // (a) rare duct creep: break out at ONE vent somewhere along the run
+            if (rng.nextInt(100) < DUCT_SPREAD_PERCENT) {
+                Block vent = adjacentDuctVent(f);
+                if (vent != null) lightOneVent(vent, rng);
+            }
+            // (b) rare general creep: jump to one adjacent air block against a solid
+            if (rng.nextInt(1000) < GENERAL_SPREAD_PERMILLE) {
+                igniteAdjacentAir(f, rng);
+            }
         }
-        for (Block vent : seeds) {
-            // walk the connected duct network (logs + wood pipes), bounded
-            java.util.Set<String> seen = new java.util.HashSet<>();
-            java.util.ArrayDeque<Block> queue = new java.util.ArrayDeque<>();
-            queue.add(vent); seen.add(key(vent));
-            int lit = 0;
-            while (!queue.isEmpty() && seen.size() < 48 && lit < 3) {
-                Block b = queue.poll();
-                if (b.getType() == DUCT_LOG) {
-                    // a vent opening - break fire out into an adjacent air pocket
-                    for (org.bukkit.block.BlockFace face : FACES) {
-                        Block air = b.getRelative(face);
-                        if (air.getType() == Material.AIR && rng.nextInt(3) == 0) {
-                            air.setType(Material.FIRE);
-                            fires.put(key(air), System.currentTimeMillis());
-                            lit++;
-                            break;
-                        }
-                    }
-                }
-                for (org.bukkit.block.BlockFace face : FACES) {
-                    Block nb = b.getRelative(face);
-                    if ((nb.getType() == DUCT_LOG || nb.getType() == DUCT_PIPE) && seen.add(key(nb))) {
-                        queue.add(nb);
-                    }
+    }
+
+    /** Walk the connected duct run, gather its vent openings, and light fire at
+     *  exactly ONE of them (a single air pocket beside it). */
+    private void lightOneVent(Block start, java.util.concurrent.ThreadLocalRandom rng) {
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        java.util.ArrayDeque<Block> queue = new java.util.ArrayDeque<>();
+        java.util.List<Block> vents = new java.util.ArrayList<>();
+        queue.add(start); seen.add(key(start));
+        while (!queue.isEmpty() && seen.size() < 64) {
+            Block b = queue.poll();
+            if (b.getType() == DUCT_LOG) vents.add(b);
+            for (org.bukkit.block.BlockFace face : FACES) {
+                Block nb = b.getRelative(face);
+                if ((nb.getType() == DUCT_LOG || nb.getType() == DUCT_PIPE) && seen.add(key(nb))) {
+                    queue.add(nb);
                 }
             }
         }
+        if (vents.isEmpty()) return;
+        Block vent = vents.get(rng.nextInt(vents.size()));
+        for (org.bukkit.block.BlockFace face : FACES) {
+            Block air = vent.getRelative(face);
+            if (air.getType() == Material.AIR) {
+                air.setType(Material.FIRE);
+                fires.put(key(air), System.currentTimeMillis());
+                return;
+            }
+        }
+    }
+
+    /** Fire jumps to one adjacent AIR block that rests against some solid block. */
+    private void igniteAdjacentAir(Block fire, java.util.concurrent.ThreadLocalRandom rng) {
+        java.util.List<org.bukkit.block.BlockFace> faces =
+            new java.util.ArrayList<>(java.util.Arrays.asList(FACES));
+        java.util.Collections.shuffle(faces);
+        for (org.bukkit.block.BlockFace face : faces) {
+            Block air = fire.getRelative(face);
+            if (air.getType() != Material.AIR) continue;
+            for (org.bukkit.block.BlockFace s : FACES) {
+                Block near = air.getRelative(s);
+                if (near.getType().isSolid() && near.getType() != Material.FIRE) {
+                    air.setType(Material.FIRE);
+                    fires.put(key(air), System.currentTimeMillis());
+                    return;
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------- body heat
+    /** Normal body temperature (deg C) everyone rests at. */
+    private static final double BASE_TEMP = 37.0;
+    /** Temperature only ever moves this much per step - a gradual 0.1 C change. */
+    private static final double TEMP_STEP = 0.1;
+    /** Hottest a nearby fire pushes you: +2 C right in it, easing to +1 C at the
+     *  edge of {@link #HEAT_RADIUS}. So being close raises you by 1-2 C. */
+    private static final double MAX_FIRE_RISE = 2.0;
+    private static final double MIN_FIRE_RISE = 1.0;
+    private static final double HEAT_RADIUS = 5.0;
+    private final java.util.Map<UUID, Double> bodyTemp = new java.util.HashMap<>();
+    private int tempTick;
+
+    /** Every half-second: nudge each player's body temperature 0.1 C toward its
+     *  target (raised by nearby fire, decaying back to normal otherwise), and show
+     *  it on the action bar while it's above normal. */
+    public void temperatureTick() {
+        tempTick++;
+        for (Player p : plugin.getServer().getOnlinePlayers()) {
+            double temp = bodyTemp.getOrDefault(p.getUniqueId(), BASE_TEMP);
+            double target = BASE_TEMP + fireHeat(p);
+            if (temp < target - 1e-6) temp = Math.min(target, temp + TEMP_STEP);
+            else if (temp > target + 1e-6) temp = Math.max(target, temp - TEMP_STEP);
+            temp = Math.round(temp * 10.0) / 10.0;
+            bodyTemp.put(p.getUniqueId(), temp);
+            if (temp > BASE_TEMP + 1e-6 && tempTick % 4 == 0) {
+                NamedTextColor c = temp >= 38.5 ? NamedTextColor.RED
+                    : temp >= 37.7 ? NamedTextColor.GOLD : NamedTextColor.YELLOW;
+                ActionBars.message(p, Component.text(
+                    String.format(java.util.Locale.ROOT, "🌡 %.1f°C", temp), c));
+            }
+        }
+    }
+
+    /** How much nearby fire raises the target temperature (0..MAX_FIRE_RISE):
+     *  closer = hotter, using the nearest tracked fire within HEAT_RADIUS. */
+    private double fireHeat(Player p) {
+        Location loc = p.getLocation();
+        String world = loc.getWorld().getName();
+        double best = -1;
+        for (String k : fires.keySet()) {
+            String[] pr = k.split(":");
+            if (!pr[0].equals(world)) continue;
+            double dx = Integer.parseInt(pr[1]) + 0.5 - loc.getX();
+            double dy = Integer.parseInt(pr[2]) + 0.5 - loc.getY();
+            double dz = Integer.parseInt(pr[3]) + 0.5 - loc.getZ();
+            double d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            if (d <= HEAT_RADIUS && (best < 0 || d < best)) best = d;
+        }
+        if (best < 0) return 0.0;
+        // distance 0 -> +2 C, distance HEAT_RADIUS -> +1 C
+        double rise = MAX_FIRE_RISE - (MAX_FIRE_RISE - MIN_FIRE_RISE) * (best / HEAT_RADIUS);
+        return Math.max(0.0, rise);
+    }
+
+    /** The player's current body temperature (for any other system that wants it). */
+    public double bodyTemperature(UUID player) {
+        return bodyTemp.getOrDefault(player, BASE_TEMP);
     }
 
     private static final org.bukkit.block.BlockFace[] FACES = {

@@ -5,111 +5,87 @@ import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
-import org.bukkit.entity.Entity;
-import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
-import org.bukkit.entity.Projectile;
-import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
-import org.bukkit.event.entity.EntityDamageByEntityEvent;
-import org.bukkit.event.entity.EntityDamageEvent;
-import org.bukkit.inventory.ItemStack;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
 /**
- * SCP-1033-RU, the "Universal Protector": a ceramic bracelet that lets no
- * serious harm reach its carrier - twelve unseen probes see to it. Anything
- * that ATTACKS the carrier inside ten meters is answered instantly and
- * brutally (the "sense of aggressor"). None of it is free: every act of
- * protection is paid for in the carrier's blood, drained heartbeat by
- * heartbeat afterwards - a debt the bracelet always collects, up to and
- * including everything. Full exsanguination separates the bracelet.
+ * SCP-1033-RU, the "Universal Protector": a ceramic bracelet whose twelve unseen
+ * probes strengthen its carrier. It no longer bleeds them dry - instead its gifts
+ * come on GRADUALLY the longer it's worn: strength, ten extra hearts and a suite
+ * of other boons that ramp up to full over {@link #ATTUNE_SECONDS} seconds, and
+ * ease back off if the bracelet is removed. Nothing here ever harms the carrier.
  *
- * Toggled on/off by right-click like the other trinkets ({@link Trinkets});
- * active from any inventory slot.
+ * Toggled on/off by right-click like the other trinkets ({@link Trinkets}); active
+ * from any inventory slot.
  */
 public final class Scp1033Listener implements Listener, Runnable {
 
-    private static final double RETALIATION_DAMAGE = 20.0;
-    private static final double RETALIATION_BLOOD = 4.0;
-    private static final double DRAIN_PER_SECOND = 1.0;
+    /** Seconds of continuous wear to reach the full set of buffs. */
+    private static final int ATTUNE_SECONDS = 40;
 
     private final LabraPlugin plugin;
-    /** Outstanding blood debt per carrier, in half-hearts. In-memory only:
-     *  a relog forgives the remainder - the Foundation never said the
-     *  paperwork was fair in the other direction. */
-    private final Map<UUID, Double> debt = new HashMap<>();
+    /** How attuned each carrier is (0..ATTUNE_SECONDS): climbs while worn, falls when not. */
+    private final Map<UUID, Integer> attune = new HashMap<>();
+    /** Carriers we've already told they hit full attunement (once per session). */
+    private final java.util.Set<UUID> announced = new java.util.HashSet<>();
 
     public Scp1033Listener(LabraPlugin plugin) {
         this.plugin = plugin;
     }
 
-    /** All protection goes through here: harm is refused and billed. */
-    @EventHandler(ignoreCancelled = true)
-    public void onHarm(EntityDamageEvent event) {
-        if (!(event.getEntity() instanceof Player carrier)) return;
-        if (!Trinkets.hasActive(carrier, "scp1033")) return;
-        // the drain arrives via setHealth, not the damage system, so any
-        // damage event here is genuinely external - refuse it and bill it
-        event.setCancelled(true);
-        addDebt(carrier, event.getDamage() * 0.75);
-
-        if (event instanceof EntityDamageByEntityEvent byEntity) {
-            Entity aggressor = byEntity.getDamager() instanceof Projectile projectile
-                && projectile.getShooter() instanceof Entity shooter ? shooter : byEntity.getDamager();
-            if (aggressor instanceof LivingEntity living && !living.equals(carrier)
-                && living.getWorld().equals(carrier.getWorld())
-                && living.getLocation().distanceSquared(carrier.getLocation()) <= 100) {
-                living.damage(RETALIATION_DAMAGE, carrier);
-                living.getWorld().playSound(living.getLocation(), Sound.ENTITY_PLAYER_ATTACK_CRIT, 1f, 0.5f);
-                living.getWorld().spawnParticle(Particle.CRIT, living.getLocation().add(0, 1, 0),
-                    20, 0.3, 0.5, 0.3, 0.1);
-                addDebt(carrier, RETALIATION_BLOOD);
-            }
-        }
-    }
-
-    private void addDebt(Player carrier, double amount) {
-        debt.merge(carrier.getUniqueId(), amount, Double::sum);
-        carrier.getWorld().spawnParticle(Particle.DUST, carrier.getLocation().add(0, 1, 0), 6,
-            0.25, 0.4, 0.25, new Particle.DustOptions(org.bukkit.Color.fromRGB(140, 10, 10), 1.0f));
-    }
-
-    /** Once a second: the probes strengthen the carrier - and the bracelet
-     *  collects what it is owed. */
+    /** Once a second: ramp the carrier's attunement up (or down) and apply the
+     *  buffs at their current level. Nothing here ever harms the carrier. */
     @Override
     public void run() {
         for (Player player : plugin.getServer().getOnlinePlayers()) {
-            if (!Trinkets.hasActive(player, "scp1033")) continue;
-            // twelve probes, working: the carrier is more than themselves
-            player.addPotionEffect(new org.bukkit.potion.PotionEffect(
-                org.bukkit.potion.PotionEffectType.STRENGTH, 45, 1, true, false));
-            player.addPotionEffect(new org.bukkit.potion.PotionEffect(
-                org.bukkit.potion.PotionEffectType.REGENERATION, 45, 1, true, false));
-            Double owed = debt.get(player.getUniqueId());
-            if (owed == null || owed <= 0) continue;
-            double payment = Math.min(DRAIN_PER_SECOND, owed);
-            debt.put(player.getUniqueId(), owed - payment);
-            player.getWorld().spawnParticle(Particle.DUST, player.getLocation().add(0, 1.2, 0), 4,
-                0.2, 0.3, 0.2, new Particle.DustOptions(org.bukkit.Color.fromRGB(120, 8, 8), 0.8f));
-            if (player.getHealth() - payment <= 0.5) {
-                // full exsanguination: the bracelet separates on its own
-                debt.remove(player.getUniqueId());
-                for (ItemStack item : player.getInventory().getContents()) {
-                    if ("scp1033".equals(Trinkets.baseOf(item)) && Trinkets.isActive(item)) {
-                        Trinkets.setActive(item, false);
-                    }
-                }
-                ActionBars.message(player, Component.text("The bracelet is satisfied.",
-                    NamedTextColor.DARK_RED, TextDecoration.ITALIC));
-                player.setHealth(0.0);
+            UUID id = player.getUniqueId();
+            boolean worn = Trinkets.hasActive(player, "scp1033");
+            int level = attune.getOrDefault(id, 0);
+            if (worn) {
+                level = Math.min(ATTUNE_SECONDS, level + 1);
             } else {
-                player.setHealth(player.getHealth() - payment);
-                player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_HURT_DROWN, 0.4f, 0.6f);
+                if (level == 0) { announced.remove(id); continue; }
+                level = Math.max(0, level - 2);   // fades twice as fast as it builds
+            }
+            attune.put(id, level);
+            if (level == 0) { announced.remove(id); continue; }
+
+            double f = level / (double) ATTUNE_SECONDS;   // 0..1 attunement fraction
+            // ~1s effects, re-applied each tick so they never lapse; ambient (no swirl).
+            // HEALTH_BOOST 4 = +20 HP = ten extra hearts, reached at full attunement.
+            apply(player, PotionEffectType.HEALTH_BOOST, (int) Math.round(f * 4));
+            apply(player, PotionEffectType.STRENGTH, f >= 0.5 ? 1 : 0);
+            apply(player, PotionEffectType.REGENERATION, f >= 0.25 ? 1 : 0);
+            apply(player, PotionEffectType.RESISTANCE, f >= 0.75 ? 1 : 0);
+            apply(player, PotionEffectType.SPEED, f >= 0.5 ? 0 : -1);
+            apply(player, PotionEffectType.SATURATION, f >= 0.9 ? 0 : -1);
+
+            if (level >= ATTUNE_SECONDS && announced.add(id)) {
+                ActionBars.message(player, Component.text("The bracelet is fully attuned to you.",
+                    NamedTextColor.AQUA, TextDecoration.ITALIC));
+                player.playSound(player.getLocation(), Sound.BLOCK_BEACON_ACTIVATE, 0.6f, 1.6f);
+            }
+            if (level % 4 == 0) {
+                player.getWorld().spawnParticle(Particle.DUST, player.getLocation().add(0, 1.1, 0), 3,
+                    0.25, 0.4, 0.25, new Particle.DustOptions(org.bukkit.Color.fromRGB(90, 180, 220), 0.7f));
             }
         }
+    }
+
+    /** Refresh one effect at the given amplifier; amplifier < 0 means "not yet". */
+    private void apply(Player player, PotionEffectType type, int amplifier) {
+        if (amplifier < 0) return;
+        player.addPotionEffect(new PotionEffect(type, 45, amplifier, true, false, false));
+    }
+
+    public void forget(UUID player) {
+        attune.remove(player);
+        announced.remove(player);
     }
 }
