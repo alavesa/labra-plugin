@@ -140,7 +140,7 @@ public final class LabRegistry {
             case "super", "heavy" -> tier.toLowerCase();
             default -> "normal";
         };
-        ItemStack item = new ItemStack(Material.CARVED_PUMPKIN);
+        ItemStack item = new ItemStack(Material.LEATHER_HELMET);
         ItemMeta meta = item.getItemMeta();
         String name = switch (t) {
             case "super" -> "Super Gas Mask";
@@ -165,6 +165,45 @@ public final class LabRegistry {
     public String gasMaskTier(ItemStack item) {
         if (!isGasMask(item)) return null;
         return item.getItemMeta().getPersistentDataContainer().get(gasMaskKey, PersistentDataType.STRING);
+    }
+
+    // --- night-vision goggles (leather helmet + custom model, per type) ----------
+    private final NamespacedKey nvgTypeKey = new NamespacedKey("labra", "nvg_type");
+
+    /** NVG goggles. type: "green" (draining battery), "red" (infinite battery),
+     *  "blue" (infinite; sees SCP locations through walls). */
+    public ItemStack buildNvg(String type) {
+        String t = switch (type == null ? "" : type.toLowerCase()) {
+            case "red", "blue" -> type.toLowerCase();
+            default -> "green";
+        };
+        ItemStack item = new ItemStack(Material.LEATHER_HELMET);
+        ItemMeta meta = item.getItemMeta();
+        String name = switch (t) {
+            case "red" -> "Red NVG"; case "blue" -> "Recon NVG"; default -> "Night Vision Goggles";
+        };
+        NamedTextColor col = switch (t) {
+            case "red" -> NamedTextColor.RED; case "blue" -> NamedTextColor.AQUA; default -> NamedTextColor.GREEN;
+        };
+        meta.itemName(Component.text(name, col).decoration(TextDecoration.ITALIC, false));
+        String model = switch (t) { case "red" -> "lab_nvg_red"; case "blue" -> "lab_nvg_blue"; default -> "lab_nvg"; };
+        CustomModelDataComponent cmd = meta.getCustomModelDataComponent();
+        cmd.setStrings(List.of(model));
+        meta.setCustomModelDataComponent(cmd);
+        meta.getPersistentDataContainer().set(nvgTypeKey, PersistentDataType.STRING, t);
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    public boolean isNvg(ItemStack item) {
+        return item != null && item.getType() == Material.LEATHER_HELMET && item.hasItemMeta()
+            && item.getItemMeta().getPersistentDataContainer().has(nvgTypeKey, PersistentDataType.STRING);
+    }
+
+    /** "green" | "red" | "blue", or null if it isn't NVG. */
+    public String nvgType(ItemStack item) {
+        if (!isNvg(item)) return null;
+        return item.getItemMeta().getPersistentDataContainer().get(nvgTypeKey, PersistentDataType.STRING);
     }
 
     public void load() {

@@ -66,7 +66,7 @@ public final class LabraPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(scp038, this);
         getServer().getScheduler().runTaskTimer(this, scp038, 40L, 20L);
         getServer().getPluginManager().registerEvents(new Trinkets(), this);
-        NvgListener nvg = new NvgListener(this);
+        NvgListener nvg = new NvgListener(this, registry);
         getServer().getPluginManager().registerEvents(nvg, this);
         getServer().getScheduler().runTaskTimer(this, nvg, 40L, 20L);
         RestraintsListener restraints = new RestraintsListener(this);
@@ -146,7 +146,7 @@ public final class LabraPlugin extends JavaPlugin {
                         case "kit", "rod", "pipette", "manual", "table",
                              "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "quarter",
                              "scp268", "scp1499", "scp714", "scp018", "scp427", "scp1033",
-                             "nvg", "ziptie", "handcuffs", "battery", "medkit", "scp005" -> {
+                             "ziptie", "handcuffs", "battery", "medkit", "scp005" -> {
                             if (!sender.hasPermission("lab.give")) return error(sender, "No permission.");
                             runAs(target, "lab:give/" + args[1].toLowerCase());
                             sender.sendMessage(Component.text("Gave lab " + args[1].toLowerCase()
@@ -174,6 +174,15 @@ public final class LabraPlugin extends JavaPlugin {
                                 .forEach(left -> target.getWorld().dropItemNaturally(target.getLocation(), left));
                             sender.sendMessage(Component.text("Gave a fire extinguisher to "
                                 + target.getName(), NamedTextColor.RED));
+                        }
+                        case "nvg", "nvgred", "nvgblue" -> {
+                            if (!sender.hasPermission("lab.give")) return error(sender, "No permission.");
+                            String type = args[1].equalsIgnoreCase("nvgred") ? "red"
+                                : args[1].equalsIgnoreCase("nvgblue") ? "blue" : "green";
+                            target.getInventory().addItem(registry.buildNvg(type)).values()
+                                .forEach(left -> target.getWorld().dropItemNaturally(target.getLocation(), left));
+                            sender.sendMessage(Component.text("Gave " + type + " NVG to "
+                                + target.getName(), NamedTextColor.GREEN));
                         }
                         case "gasmask", "supergasmask", "heavygasmask" -> {
                             if (!sender.hasPermission("lab.give")) return error(sender, "No permission.");
@@ -372,7 +381,7 @@ public final class LabraPlugin extends JavaPlugin {
                     "pipette", "manual", "table", "element",
                     "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "quarter",
                     "scp268", "scp1499", "scp714", "scp018", "scp427", "scp1033",
-                    "nvg", "ziptie", "handcuffs", "battery", "medkit", "scp005"), args[1]);
+                    "nvg", "nvgred", "nvgblue", "ziptie", "handcuffs", "battery", "medkit", "scp005"), args[1]);
                 case "zone" -> filter(Stream.of("add", "remove", "list", "alarm"), args[1]);
                 case "scp1499" -> filter(Stream.of("sethere", "info"), args[1]);
                 case "place" -> filter(MACHINES.stream(), args[1]);

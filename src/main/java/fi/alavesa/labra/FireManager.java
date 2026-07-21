@@ -146,13 +146,22 @@ public final class FireManager implements Listener, Runnable {
     public void maskTick() {
         for (Player p : plugin.getServer().getOnlinePlayers()) {
             String tier = registry.gasMaskTier(p.getInventory().getHelmet());
-            if (tier == null) { ActionBars.clearMask(p); continue; }
+            if (tier == null) { nvgOverlay(p); continue; }
             char ch = switch (tier) { case "super" -> ''; case "heavy" -> ''; default -> ''; };
             Component glyph = Component.text(String.valueOf(ch))
                 .font(net.kyori.adventure.key.Key.key("lab", "gasmask"))
                 .color(NamedTextColor.WHITE);
             ActionBars.mask(p, glyph, 1024);
         }
+    }
+
+    /** The worn NVG's per-type overlay (green/red/blue), or clear the mask slot. */
+    private void nvgOverlay(Player p) {
+        String nvg = registry.nvgType(p.getInventory().getHelmet());
+        if (nvg == null) { ActionBars.clearMask(p); return; }
+        char ch = switch (nvg) { case "red" -> ''; case "blue" -> ''; default -> ''; };
+        ActionBars.mask(p, Component.text(String.valueOf(ch))
+            .font(net.kyori.adventure.key.Key.key("lab", "nvg")).color(NamedTextColor.WHITE), 1024);
     }
 
     /** How many of the 26 surrounding blocks are also fire. */
@@ -195,7 +204,7 @@ public final class FireManager implements Listener, Runnable {
             int sev = Math.min(3, fire / 12);
             p.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, 100, 0, true, false, false));
             p.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, 40, sev, true, false, false));
-            p.sendActionBar(Component.text("You inhale the smoke.", NamedTextColor.GRAY, TextDecoration.ITALIC));
+            ActionBars.message(p, Component.text("You inhale the smoke.", NamedTextColor.GRAY, TextDecoration.ITALIC));
             if (exposure > SMOKE_DYING_AFTER) {
                 p.damage(1.0 + Math.min(3.0, (exposure - SMOKE_DYING_AFTER) / 4.0));   // choking, escalating
             }
@@ -323,12 +332,13 @@ public final class FireManager implements Listener, Runnable {
         int charge = registry.extinguisherCharge(held);
         if (charge <= 0) {
             player.playSound(player.getLocation(), Sound.BLOCK_DISPENSER_FAIL, 0.7f, 1.4f);
-            player.sendActionBar(Component.text("The extinguisher is empty.", NamedTextColor.GRAY));
+            ActionBars.message(player, Component.text("Fire Extinguisher - empty", NamedTextColor.GRAY));
             return;
         }
         registry.setExtinguisherCharge(held, charge - 1);
         spray(player);
-        player.sendActionBar(Component.text("Extinguisher charge: "
+        // Through the hub so it composes with the sprint/blink bars, no flicker.
+        ActionBars.message(player, Component.text("Fire Extinguisher - "
             + Math.round((charge - 1) / (float) LabRegistry.EXTINGUISHER_MAX * 100) + "%", NamedTextColor.GRAY));
     }
 
