@@ -46,12 +46,19 @@ public final class ActionBars {
      *  so it never flickers with the meters/messages. Re-sent while the mask is worn. */
     private record Mask(Component glyph, int width, long until) { }
 
+    /** A centered aim reticle (the Guns crosshair brackets): composed like the mask
+     *  so a held gun's reticle never erases the blink/sprint meters or messages.
+     *  Re-sent every tick by Guns while a gun is held. */
+    private record Reticle(Component glyph, int width, long until) { }
+
     private static final Map<UUID, State> STATES = new ConcurrentHashMap<>();
     private static final Map<UUID, Meters> METERS = new ConcurrentHashMap<>();
     private static final Map<UUID, Mask> MASKS = new ConcurrentHashMap<>();
+    private static final Map<UUID, Reticle> RETICLES = new ConcurrentHashMap<>();
     private static final long TRANSIENT_MS = 4000;
     private static final long METERS_MS = 500;
     private static final long MASK_MS = 500;
+    private static final long RETICLE_MS = 500;
     /** The top line goes stale fast: its owner (the speedometer) re-sends it
      *  every tick while it's relevant, so it disappears within a couple of
      *  ticks of the driver letting go instead of lingering for seconds. */
@@ -80,7 +87,12 @@ public final class ActionBars {
                     MASKS.remove(player.getUniqueId());
                     mask = null;
                 }
-                if (state == null && meters == null && mask == null) continue;
+                Reticle reticle = RETICLES.get(player.getUniqueId());
+                if (reticle != null && reticle.until() < now) {
+                    RETICLES.remove(player.getUniqueId());
+                    reticle = null;
+                }
+                if (state == null && meters == null && mask == null && reticle == null) continue;
                 render(player);
             }
         }, 40L, 10L);
@@ -164,13 +176,28 @@ public final class ActionBars {
         MASKS.remove(player.getUniqueId());
     }
 
+    /** The Guns aim reticle: {@code glyph} is a guns:reticle bracket string (its
+     *  own font ascent lifts it to the crosshair); {@code width} is its rendered
+     *  pixel advance. Re-send every tick while a gun is held; it centers and
+     *  composes with the meters/mask/messages instead of erasing them. */
+    public static void reticle(Player player, Component glyph, int width) {
+        RETICLES.put(player.getUniqueId(), new Reticle(glyph, width, System.currentTimeMillis() + RETICLE_MS));
+        render(player);
+    }
+
+    public static void clearReticle(Player player) {
+        RETICLES.remove(player.getUniqueId());
+    }
+
     private static void render(Player player) {
         long now = System.currentTimeMillis();
         State state = STATES.get(player.getUniqueId());
         Meters meters = METERS.get(player.getUniqueId());
         Mask mask = MASKS.get(player.getUniqueId());
+        Reticle reticle = RETICLES.get(player.getUniqueId());
         boolean metersLive = meters != null && meters.until() >= now;
         boolean maskLive = mask != null && mask.until() >= now;
+        boolean reticleLive = reticle != null && reticle.until() >= now;
 
         // --- build the centered "base" (top/transient text + persistent bar) ---
         Component base = null;
@@ -196,17 +223,23 @@ public final class ActionBars {
             }
         }
 
-        if (!metersLive && !maskLive) {
+        if (!metersLive && !maskLive && !reticleLive) {
             if (base != null) player.sendActionBar(base);
             return;
         }
 
         // A single line carries everything. Pick a total advance T that the client
         // centers on: the base's width if there is one, else the mask's, else the
-        // meters'. Then append the meters (left-anchored) and mask (centered) with
-        // net-zero advances so they sit where they should without disturbing T.
-        int T = base != null ? baseWidth : (maskLive ? mask.width() : 2 * meters.leftShift());
-        if (T <= 0) T = maskLive ? mask.width() : 2 * meters.leftShift();
+        // meters', else the reticle's. Then append the meters (left-anchored) and the
+        // centered overlays (mask, reticle) with net-zero advances so they sit where
+        // they should without disturbing T.
+        int T;
+        if (base != null) T = baseWidth;
+        else if (maskLive) T = mask.width();
+        else if (metersLive) T = 2 * meters.leftShift();
+        else T = reticle.width();
+        if (T <= 0) T = maskLive ? mask.width() : reticleLive ? reticle.width()
+            : (meters != null ? 2 * meters.leftShift() : 1);
         Component out = base != null ? base : advance(T);   // an invisible T-wide spacer sets the centering
 
         if (metersLive) {
@@ -218,6 +251,11 @@ public final class ActionBars {
         if (maskLive) {
             int w = mask.width();
             out = out.append(advance(-w / 2 - T / 2)).append(mask.glyph())
+                     .append(advance(T / 2 - w / 2));
+        }
+        if (reticleLive) {
+            int w = reticle.width();
+            out = out.append(advance(-w / 2 - T / 2)).append(reticle.glyph())
                      .append(advance(T / 2 - w / 2));
         }
         player.sendActionBar(out);

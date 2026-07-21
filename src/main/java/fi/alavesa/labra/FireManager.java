@@ -157,11 +157,12 @@ public final class FireManager implements Listener, Runnable {
 
     private final java.util.Set<UUID> overlayShown = new java.util.HashSet<>();
 
-    /** The full-screen headgear overlay, painted as a TITLE (a title renders big
-     *  centered glyphs where the actionbar wouldn't). Re-sent while worn. */
+    /** The full-screen headgear overlay, painted as a custom-textured SUBTITLE
+     *  message (the glyph's own ascent/height fill the view). A subtitle renders
+     *  the big centered glyph reliably; re-sent while the mask/NVG is worn. */
     private void showTitleGlyph(Player p, Component glyph) {
         overlayShown.add(p.getUniqueId());
-        p.showTitle(net.kyori.adventure.title.Title.title(glyph, Component.empty(),
+        p.showTitle(net.kyori.adventure.title.Title.title(Component.empty(), glyph,
             net.kyori.adventure.title.Title.Times.times(
                 java.time.Duration.ZERO, java.time.Duration.ofMillis(1500), java.time.Duration.ZERO)));
     }
