@@ -145,6 +145,11 @@ public final class FireManager implements Listener, Runnable {
      *  instead of the vanilla pumpkin blur (now cleared). Scheduled every few ticks. */
     public void maskTick() {
         for (Player p : plugin.getServer().getOnlinePlayers()) {
+            // While the player is mid-blink, the blink darkness OWNS the title. If we
+            // sent the mask/NVG glyph now it would overwrite that darkness and cut the
+            // blink short - so yield until the blink is over (blink lasts the same
+            // whether or not headgear is worn).
+            if (isBlinking(p)) continue;
             String tier = registry.gasMaskTier(p.getInventory().getHelmet());
             if (tier == null) { nvgOverlay(p); continue; }
             char ch = switch (tier) { case "super" -> ''; case "heavy" -> ''; default -> ''; };
@@ -156,6 +161,16 @@ public final class FireManager implements Listener, Runnable {
     }
 
     private final java.util.Set<UUID> overlayShown = new java.util.HashSet<>();
+
+    /** True while ScpMobs reports this player is mid-blink (lab.blinking == 1). The
+     *  blink darkness is a title too, so the mask/NVG overlay must not overwrite it. */
+    private boolean isBlinking(Player p) {
+        var board = Bukkit.getScoreboardManager().getMainScoreboard();
+        org.bukkit.scoreboard.Objective o = board.getObjective("lab.blinking");
+        if (o == null) return false;
+        var score = o.getScore(p.getName());
+        return score.isScoreSet() && score.getScore() >= 1;
+    }
 
     /** The full-screen headgear overlay, painted as the TITLE glyph. A title renders
      *  at ~4x scale, which is what makes the custom-textured glyph FILL the screen -
