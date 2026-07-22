@@ -29,9 +29,14 @@ public final class SprintManager implements Runnable, Listener {
     private static final double RECOVER_AT = 40.0;      // must reach this to sprint again
     private static final int TICK_PERIOD = 2;           // scheduled every 2 ticks
 
+    /** How long the "you ran the bar dry" penalty lasts: Slowness I + no running. */
+    private static final int WINDED_TICKS = 60;   // 3 seconds
+
     private final LabRegistry registry;
     private final Map<UUID, Double> stamina = new HashMap<>();
     private final Map<UUID, Boolean> winded = new HashMap<>();
+    /** Ticks of forced wind remaining after emptying the bar (the 3s lock-out). */
+    private final Map<UUID, Integer> windedTicks = new HashMap<>();
 
     public SprintManager(LabRegistry registry) {
         this.registry = registry;
@@ -81,13 +86,26 @@ public final class SprintManager implements Runnable, Listener {
                 if (s <= 0) {
                     s = 0;
                     wind = true;
+                    windedTicks.put(id, WINDED_TICKS);        // 3s locked out of running
                     player.setSprinting(false);
-                    player.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, 30, 0, true, false, false));
+                    // Slowness I for 3 seconds sells the exhaustion
+                    player.addPotionEffect(new PotionEffect(
+                        PotionEffectType.SLOWNESS, WINDED_TICKS, 0, true, false, false));
                 }
             } else {
                 s = Math.min(MAX, s + REGEN);
-                if (wind && s >= RECOVER_AT) wind = false;
-                if (wind) player.setSprinting(false);   // hold them at a walk until recovered
+            }
+            // Run the 3-second wind-down: they can't run at all while it lasts, and
+            // only recover afterwards once the bar has climbed back over the threshold.
+            int wt = windedTicks.getOrDefault(id, 0);
+            if (wt > 0) {
+                windedTicks.put(id, Math.max(0, wt - TICK_PERIOD));
+                wind = true;
+                player.setSprinting(false);
+            } else if (wind && s >= RECOVER_AT) {
+                wind = false;
+            } else if (wind) {
+                player.setSprinting(false);   // still winded (bar too low) - hold at a walk
             }
             stamina.put(id, s);
             winded.put(id, wind);
@@ -105,5 +123,6 @@ public final class SprintManager implements Runnable, Listener {
     public void forget(UUID id) {
         stamina.remove(id);
         winded.remove(id);
+        windedTicks.remove(id);
     }
 }

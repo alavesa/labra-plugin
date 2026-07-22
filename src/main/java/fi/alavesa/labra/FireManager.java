@@ -157,12 +157,13 @@ public final class FireManager implements Listener, Runnable {
 
     private final java.util.Set<UUID> overlayShown = new java.util.HashSet<>();
 
-    /** The full-screen headgear overlay, painted as a custom-textured SUBTITLE
-     *  message (the glyph's own ascent/height fill the view). A subtitle renders
-     *  the big centered glyph reliably; re-sent while the mask/NVG is worn. */
+    /** The full-screen headgear overlay, painted as the TITLE glyph. A title renders
+     *  at ~4x scale, which is what makes the custom-textured glyph FILL the screen -
+     *  a subtitle renders at ~half that, which shrank the overlay to a small circle.
+     *  Re-sent while the mask/NVG is worn. */
     private void showTitleGlyph(Player p, Component glyph) {
         overlayShown.add(p.getUniqueId());
-        p.showTitle(net.kyori.adventure.title.Title.title(Component.empty(), glyph,
+        p.showTitle(net.kyori.adventure.title.Title.title(glyph, Component.empty(),
             net.kyori.adventure.title.Title.Times.times(
                 java.time.Duration.ZERO, java.time.Duration.ofMillis(1500), java.time.Duration.ZERO)));
     }
@@ -407,6 +408,25 @@ public final class FireManager implements Listener, Runnable {
         org.bukkit.block.BlockFace.NORTH, org.bukkit.block.BlockFace.SOUTH,
         org.bukkit.block.BlockFace.EAST, org.bukkit.block.BlockFace.WEST };
 
+    /** A full 3D orientation for something mounted flat on the given block face: a
+     *  yaw so it faces out of a wall, plus a pitch so it lies on a floor/ceiling.
+     *  Falls back to the player's yaw for faces that don't pin a horizontal facing. */
+    private static org.joml.Quaternionf faceRotation(org.bukkit.block.BlockFace face, float fallbackYaw) {
+        float yaw = switch (face) {
+            case NORTH -> 180f; case SOUTH -> 0f; case WEST -> 90f; case EAST -> -90f; default -> fallbackYaw;
+        };
+        float pitch = switch (face) { case UP -> -90f; case DOWN -> 90f; default -> 0f; };
+        return new org.joml.Quaternionf()
+            .rotateY((float) Math.toRadians(-yaw))
+            .rotateX((float) Math.toRadians(pitch));
+    }
+
+    /** Parse a stored BlockFace name, or a sensible default. */
+    private static org.bukkit.block.BlockFace faceOf(String name) {
+        try { return org.bukkit.block.BlockFace.valueOf(name); }
+        catch (Exception e) { return org.bukkit.block.BlockFace.SOUTH; }
+    }
+
     private Block adjacentDuctVent(Block fire) {
         for (org.bukkit.block.BlockFace face : FACES) {
             Block b = fire.getRelative(face);
@@ -507,13 +527,13 @@ public final class FireManager implements Listener, Runnable {
             case NORTH -> 180f; case SOUTH -> 0f; case WEST -> 90f; case EAST -> -90f; default -> player.getYaw();
         };
         at.setYaw(yaw);
+        org.joml.Quaternionf rot = faceRotation(face, player.getYaw());
         ItemDisplay disp = at.getWorld().spawn(at, ItemDisplay.class, d -> {
             d.setItemStack(registry.buildSprinklerButtonItem());
             d.addScoreboardTag(TAG_SPRINK_BTN);
             d.setBillboard(org.bukkit.entity.Display.Billboard.FIXED);
             d.setTransformation(new Transformation(new Vector3f(0, 0, 0),
-                new AxisAngle4f((float) Math.toRadians(-yaw), 0, 1, 0),
-                new Vector3f(0.6f, 0.6f, 0.6f), new AxisAngle4f()));
+                rot, new Vector3f(0.6f, 0.6f, 0.6f), new org.joml.Quaternionf()));
         });
         Interaction btn = at.getWorld().spawn(at.clone().subtract(0, 0.3, 0), Interaction.class, i -> {
             i.addScoreboardTag(TAG_SPRINK_BTN);
@@ -645,14 +665,14 @@ public final class FireManager implements Listener, Runnable {
             case NORTH -> 180f; case SOUTH -> 0f; case WEST -> 90f; case EAST -> -90f; default -> player.getYaw();
         };
         at.setYaw(yaw);
+        org.joml.Quaternionf rot = faceRotation(face, player.getYaw());
 
         ItemDisplay bracket = at.getWorld().spawn(at, ItemDisplay.class, d -> {
             d.setItemStack(registry.buildMountItem());
             d.addScoreboardTag(TAG_MOUNT);
             d.setBillboard(org.bukkit.entity.Display.Billboard.FIXED);
             d.setTransformation(new Transformation(new Vector3f(0, 0, 0),
-                new AxisAngle4f((float) Math.toRadians(-yaw), 0, 1, 0),
-                new Vector3f(1.0f, 1.0f, 1.0f), new AxisAngle4f()));
+                rot, new Vector3f(1.0f, 1.0f, 1.0f), new org.joml.Quaternionf()));
         });
         // The Interaction's position is the BOTTOM of its hitbox, so drop it half a
         // height below the model's centre - otherwise the box floats above the
@@ -665,22 +685,25 @@ public final class FireManager implements Listener, Runnable {
                 PersistentDataType.INTEGER, LabRegistry.EXTINGUISHER_MAX);
             i.getPersistentDataContainer().set(plugin.keyOf("mount_display"), PersistentDataType.STRING,
                 bracket.getUniqueId().toString());
+            // remember the surface so the canister re-docks with the same facing
+            i.getPersistentDataContainer().set(plugin.keyOf("mount_face"), PersistentDataType.STRING, face.name());
         });
-        showCanister(at, yaw, true);
+        showCanister(at, face, true);
         return true;
     }
 
-    private void showCanister(Location at, float yaw, boolean on) {
-        // a small canister in front of the bracket when the mount is full
+    private void showCanister(Location at, org.bukkit.block.BlockFace face, boolean on) {
+        // a small canister in front of the bracket when the mount is full, sitting
+        // just off the mounting surface and turned the same way as the bracket
         if (!on) return;
-        Vector out = new Vector(-Math.sin(Math.toRadians(yaw)), 0, Math.cos(Math.toRadians(yaw))).multiply(0.15);
+        Vector out = new Vector(face.getModX(), face.getModY(), face.getModZ()).multiply(0.15);
+        org.joml.Quaternionf rot = faceRotation(face, at.getYaw());
         at.getWorld().spawn(at.clone().add(out), ItemDisplay.class, d -> {
             d.setItemStack(registry.buildExtinguisher());
             d.addScoreboardTag(TAG_MOUNT_CAN);
             d.setBillboard(org.bukkit.entity.Display.Billboard.FIXED);
             d.setTransformation(new Transformation(new Vector3f(0, 0, 0),
-                new AxisAngle4f((float) Math.toRadians(-yaw), 0, 1, 0),
-                new Vector3f(0.7f, 0.7f, 0.7f), new AxisAngle4f()));
+                rot, new Vector3f(0.7f, 0.7f, 0.7f), new org.joml.Quaternionf()));
         });
     }
 
@@ -718,7 +741,9 @@ public final class FireManager implements Listener, Runnable {
             }
             pdc.set(plugin.keyOf("mount_charge"), PersistentDataType.INTEGER, registry.extinguisherCharge(held));
             held.setAmount(held.getAmount() - 1);
-            showCanister(interaction.getLocation(), interaction.getLocation().getYaw(), true);
+            String faceName = pdc.get(plugin.keyOf("mount_face"), PersistentDataType.STRING);
+            showCanister(interaction.getLocation(), faceName != null ? faceOf(faceName)
+                : org.bukkit.block.BlockFace.SOUTH, true);
             player.getWorld().playSound(interaction.getLocation(), Sound.ITEM_ARMOR_EQUIP_LEATHER, 0.7f, 0.9f);
         }
     }
