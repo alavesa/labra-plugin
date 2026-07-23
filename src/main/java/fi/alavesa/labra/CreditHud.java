@@ -20,7 +20,9 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class CreditHud implements Runnable {
 
     private final LabraPlugin plugin;
-    private final Map<UUID, BossBar> bars = new ConcurrentHashMap<>();
+    /** Two stacked bars per player: the wallet balance on top, the stash total below. */
+    private final Map<UUID, BossBar> wallet = new ConcurrentHashMap<>();
+    private final Map<UUID, BossBar> stash = new ConcurrentHashMap<>();
 
     public CreditHud(LabraPlugin plugin) {
         this.plugin = plugin;
@@ -33,26 +35,37 @@ public final class CreditHud implements Runnable {
             online.add(p.getUniqueId());
             int bal = Credits.balance(p);
             int st = Credits.stash(p);
-            Component text = Component.text("❈ ", NamedTextColor.YELLOW)
+
+            // top bar: the wallet (spendable balance)
+            Component w = Component.text("❈ ", NamedTextColor.YELLOW)
                 .append(Component.text(bal + " credits", NamedTextColor.GOLD));
-            if (st > 0) {
-                text = text.append(Component.text("   ⌂ stash ", NamedTextColor.GRAY))
-                    .append(Component.text(String.valueOf(st), NamedTextColor.AQUA));
-            }
-            BossBar bar = bars.get(p.getUniqueId());
-            if (bar == null) {
-                bar = BossBar.bossBar(text, 1f, BossBar.Color.YELLOW, BossBar.Overlay.PROGRESS);
-                bars.put(p.getUniqueId(), bar);
-                p.showBossBar(bar);
-            } else {
-                bar.name(text);
-            }
+            BossBar wb = wallet.get(p.getUniqueId());
+            if (wb == null) {
+                wb = BossBar.bossBar(w, 1f, BossBar.Color.YELLOW, BossBar.Overlay.PROGRESS);
+                wallet.put(p.getUniqueId(), wb);
+                p.showBossBar(wb);
+            } else wb.name(w);
+
+            // second bar, directly below: credits stashed away
+            Component ss = Component.text("⌂ ", NamedTextColor.AQUA)
+                .append(Component.text(st + " in stash", NamedTextColor.AQUA));
+            BossBar sb = stash.get(p.getUniqueId());
+            if (sb == null) {
+                sb = BossBar.bossBar(ss, 1f, BossBar.Color.BLUE, BossBar.Overlay.PROGRESS);
+                stash.put(p.getUniqueId(), sb);
+                p.showBossBar(sb);
+            } else sb.name(ss);
         }
-        // drop bars for players who logged off
-        bars.keySet().removeIf(id -> !online.contains(id));
+        wallet.keySet().removeIf(id -> !online.contains(id));
+        stash.keySet().removeIf(id -> !online.contains(id));
     }
 
     public void shutdown() {
+        hideAll(wallet);
+        hideAll(stash);
+    }
+
+    private void hideAll(Map<UUID, BossBar> bars) {
         for (var e : bars.entrySet()) {
             Player p = plugin.getServer().getPlayer(e.getKey());
             if (p != null) p.hideBossBar(e.getValue());
