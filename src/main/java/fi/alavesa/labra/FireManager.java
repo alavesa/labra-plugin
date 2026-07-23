@@ -205,10 +205,10 @@ public final class FireManager implements Listener, Runnable {
 
         Component glyph = headgearGlyph(p);
         // ONE money total: everything you own, the cash in your pockets PLUS your stashes.
-        // lab:hi renders it small but LIFTED high (big font ascent), toward the top-right.
-        net.kyori.adventure.key.Key hi = net.kyori.adventure.key.Key.key("lab", "hi");
+        // DEFAULT font on purpose - a custom font renders invisible if the pack isn't loaded
+        // exactly, which is what made the money vanish. Reliability beats the fancy lift.
         int total = Credits.wallet(p) + Credits.stash(p);
-        Component credits = Component.text("$" + total, NamedTextColor.GOLD).font(hi);
+        Component credits = Component.text("$" + total, NamedTextColor.GOLD);
         int cw = ActionBars.width(credits);
         int pushX = plugin.getConfig().getInt("hud.credits-x", 40);   // operator-tunable
 

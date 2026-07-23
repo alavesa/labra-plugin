@@ -227,18 +227,21 @@ public final class DownedListener implements Listener, Runnable {
             } catch (IllegalArgumentException e) { obj = board.getObjective("lab.medkit"); }
         }
         for (Player p : plugin.getServer().getOnlinePlayers()) {
-            boolean using = p.isHandRaised() && isMedkit(p.getActiveItem());
             java.util.UUID id = p.getUniqueId();
-            if (!using) {
+            boolean using = p.isHandRaised() && isMedkit(p.getActiveItem());
+            // Only show the meter when there is actually something to treat - so a player who
+            // is too healthy never sees a "Treating yourself" bar even if the hold sneaks past
+            // the interact block (the meter, the block and the heal all agree on ONE rule).
+            Player target = using ? treatmentTarget(p) : null;
+            if (target == null) {
                 MEDKIT_METER.remove(id);
                 if (obj != null) obj.getScoreboard().resetScores(p.getName());
                 continue;
             }
             if (obj != null) obj.getScore(p.getName()).setScore(1);
             float progress = Math.max(0f, Math.min(1f, p.getHandRaisedTime() / 60f));   // 3s = 60t
-            Entity tgt = p.getTargetEntity(4);
-            boolean onOther = tgt instanceof Player tp && tp != p && isDowned(tp);
-            String who = onOther ? ((Player) tgt).getName() : "yourself";
+            boolean onOther = target != p;
+            String who = onOther ? target.getName() : "yourself";
             int pct = Math.round(progress * 100);
             // Plain text only - no bar glyphs of any kind. "Treating X  70%" counting up
             // over the 3-second hold. Published for FireManager to compose with the credits.
@@ -259,22 +262,29 @@ public final class DownedListener implements Listener, Runnable {
         return MEDKIT_METER.get(id);
     }
 
-    /** Block STARTING a medkit when the holder is already at 9+ hearts (18 HP) and has
-     *  nobody downed to treat - so you can't burn a kit topping off scratches. Reviving a
-     *  downed player (self or the one you're looking at) is always allowed, healthy or not. */
+    /** The one rule for "can this medic use a medkit right now", used by the meter, the
+     *  start-block AND the heal so they never disagree. Returns who would be treated, or
+     *  null when there's nothing to treat: a downed player you're looking at, or a downed
+     *  self, or a HURT self (below 9 hearts). At 9+ hearts with nobody downed -> null. */
+    private Player treatmentTarget(Player medic) {
+        Entity tgt = medic.getTargetEntity(4);
+        if (tgt instanceof Player tp && tp != medic && isDowned(tp)) return tp;
+        if (isDowned(medic)) return medic;
+        if (medic.getHealth() < 18.0) return medic;   // hurt (< 9 hearts) -> can patch self
+        return null;                                   // healthy and nobody downed
+    }
+
+    /** Block STARTING a medkit when there's nothing to treat (best effort - the meter and
+     *  the heal enforce the same rule, so a hold that slips past here still does nothing). */
     @EventHandler(ignoreCancelled = true)
     public void onMedkitStart(org.bukkit.event.player.PlayerInteractEvent event) {
         if (!event.getAction().isRightClick()) return;
         if (!isMedkit(event.getItem())) return;
         Player p = event.getPlayer();
-        Entity tgt = p.getTargetEntity(4);
-        boolean onDowned = tgt instanceof Player tp && tp != p && isDowned(tp);
-        if (onDowned || isDowned(p)) return;                 // a revive: always allowed
-        if (p.getHealth() >= 18.0) {                         // 9 hearts
-            event.setUseItemInHand(org.bukkit.event.Event.Result.DENY);
-            event.setCancelled(true);
-            ActionBars.message(p, line("You're too healthy to need a medkit.", NamedTextColor.GRAY));
-        }
+        if (treatmentTarget(p) != null) return;              // something to treat: allow
+        event.setUseItemInHand(org.bukkit.event.Event.Result.DENY);
+        event.setCancelled(true);
+        ActionBars.message(p, line("You're too healthy to need a medkit.", NamedTextColor.GRAY));
     }
 
     /** The 3-second medkit hold completes as a "consume" - never eaten. */
@@ -283,16 +293,14 @@ public final class DownedListener implements Listener, Runnable {
         if (!isMedkit(event.getItem())) return;
         event.setCancelled(true);
         Player medic = event.getPlayer();
-        Entity target = medic.getTargetEntity(3);
-        Player patient = target instanceof Player p && isDowned(p) ? p
-            : isDowned(medic) ? medic : null;
+        Player patient = treatmentTarget(medic);
         if (patient == null) {
-            // nobody bleeding: the kit patches the holder's scrapes instead
-            if (medic.getHealth() >= 19.5) {
-                ActionBars.message(medic, line("Nothing to treat.", NamedTextColor.GRAY));
-                return;
-            }
-            medic.setHealth(Math.min(20.0, medic.getHealth() + 8.0));
+            ActionBars.message(medic, line("You're too healthy to need a medkit.", NamedTextColor.GRAY));
+            return;                                          // nothing to treat -> kit NOT spent
+        }
+        if (!isDowned(patient)) {
+            // a hurt (not downed) self: patch scrapes, don't run the revive path
+            patient.setHealth(Math.min(20.0, patient.getHealth() + 8.0));
             spend(medic);
             ActionBars.message(medic, line("Patched up.", NamedTextColor.GRAY));
             return;
