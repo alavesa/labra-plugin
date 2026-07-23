@@ -694,9 +694,10 @@ public final class FireManager implements Listener, Runnable {
      *  rains it out. We scan for fire near players (fire is the rare trigger), then look
      *  straight up for a hanging_roots head; if one is there, the fire is doused. */
     public void sprinklerTick() {
-        final int R = 10;            // horizontal search radius around each player
+        final int R = 12;            // horizontal search radius around each player
         final int UP = 14;           // how far a sprinkler head reaches up to a fire
-        java.util.Set<String> done = new java.util.HashSet<>();
+        final int RAD = 3;           // sprinkler spray radius (7x7 area beneath the head)
+        java.util.Set<String> sprinkled = new java.util.HashSet<>();   // heads already fired this tick
         for (Player pl : plugin.getServer().getOnlinePlayers()) {
             if (pl.getGameMode() == GameMode.SPECTATOR) continue;
             Block origin = pl.getLocation().getBlock();
@@ -704,7 +705,6 @@ public final class FireManager implements Listener, Runnable {
             for (int dx = -R; dx <= R; dx++) for (int dy = -5; dy <= 4; dy++) for (int dz = -R; dz <= R; dz++) {
                 Block f = origin.getRelative(dx, dy, dz);
                 if (f.getType() != Material.FIRE) continue;
-                if (!done.add(key(f))) continue;
                 // look up for a hanging_roots sprinkler head; a solid ceiling blocks it
                 Block head = null;
                 for (int up = 1; up <= UP; up++) {
@@ -713,13 +713,21 @@ public final class FireManager implements Listener, Runnable {
                     if (a.getType().isOccluding()) break;
                 }
                 if (head == null) continue;
-                f.setType(Material.AIR);
-                fires.remove(key(f));
+                if (!sprinkled.add(key(head))) continue;   // this head already rained this tick
+                // Rain a WIDE cone from the head: clear every fire in a 7x7 column all the
+                // way down to the floor, not just the block directly under it.
                 Location spout = head.getLocation().add(0.5, -0.2, 0.5);
-                w.spawnParticle(Particle.FALLING_WATER, spout, 6, 0.35, 0.1, 0.35, 0);
-                w.spawnParticle(Particle.SPLASH, f.getLocation().add(0.5, 0.1, 0.5), 6, 0.3, 0.1, 0.3, 0);
-                // douse anyone burning right under the head
-                for (var ent : w.getNearbyEntities(spout.clone().subtract(0, 3, 0), 2.5, 4, 2.5)) {
+                w.spawnParticle(Particle.FALLING_WATER, spout, 12, 1.2, 0.1, 1.2, 0);
+                for (int ddy = 0; ddy <= UP; ddy++) for (int ddx = -RAD; ddx <= RAD; ddx++) for (int ddz = -RAD; ddz <= RAD; ddz++) {
+                    Block b = head.getRelative(ddx, -ddy, ddz);
+                    if (b.getType() == Material.FIRE) {
+                        b.setType(Material.AIR);
+                        fires.remove(key(b));
+                        w.spawnParticle(Particle.SPLASH, b.getLocation().add(0.5, 0.1, 0.5), 4, 0.3, 0.1, 0.3, 0);
+                    }
+                }
+                // douse anyone burning in the spray zone below the head
+                for (var ent : w.getNearbyEntities(spout.clone().subtract(0, 5, 0), RAD + 0.5, 8, RAD + 0.5)) {
                     if (ent instanceof LivingEntity le && le.getFireTicks() > 0) le.setFireTicks(0);
                 }
             }
