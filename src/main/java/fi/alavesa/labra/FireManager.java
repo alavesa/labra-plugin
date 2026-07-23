@@ -172,9 +172,11 @@ public final class FireManager implements Listener, Runnable {
         return score.isScoreSet() && score.getScore() >= 1;
     }
 
-    /** How far right of centre the credits/stash readout is pushed (px). Tune this
-     *  one value if it doesn't sit in the top-right corner on your GUI scale. */
-    private static final int HUD_PUSH = 118;
+    /** Right-push offsets in FONT pixels. A title renders at ~4x and a subtitle at ~2x,
+     *  so the same on-screen offset needs a DIFFERENT font-px push per line - hence two
+     *  values. Bump both (keep SUB ~2x TITLE) to move it further toward the corner. */
+    private static final int TITLE_PUSH = 34;   // *4 on screen
+    private static final int SUB_PUSH = 68;     // *2 on screen -> same screen offset
 
     /**
      * The unified title HUD: the full-screen headgear glyph (mask/NVG, if worn) sits
@@ -187,18 +189,19 @@ public final class FireManager implements Listener, Runnable {
      */
     private void showTitleGlyph(Player p, Component glyph) {
         overlayShown.add(p.getUniqueId());
+        // kept short so the ~4x title text stays on-screen in the corner
         Component credits = Component.text("❈ ", NamedTextColor.YELLOW)
-            .append(Component.text(Credits.balance(p) + " credits", NamedTextColor.GOLD));
+            .append(Component.text(String.valueOf(Credits.balance(p)), NamedTextColor.GOLD));
         Component stashLine = Component.text("⌂ ", NamedTextColor.AQUA)
-            .append(Component.text(Credits.stash(p) + " in stash", NamedTextColor.AQUA));
+            .append(Component.text(String.valueOf(Credits.stash(p)), NamedTextColor.AQUA));
         int cw = ActionBars.width(credits);
         int sw = ActionBars.width(stashLine);
         // push right, draw, then rewind the full width -> the readout contributes 0 to
         // the title's centring, so the headgear glyph stays centred
-        Component titleLine = ActionBars.spacer(HUD_PUSH).append(credits)
-            .append(ActionBars.spacer(-(HUD_PUSH + cw))).append(glyph);
-        Component subLine = ActionBars.spacer(HUD_PUSH).append(stashLine)
-            .append(ActionBars.spacer(-(HUD_PUSH + sw)));
+        Component titleLine = ActionBars.spacer(TITLE_PUSH).append(credits)
+            .append(ActionBars.spacer(-(TITLE_PUSH + cw))).append(glyph);
+        Component subLine = ActionBars.spacer(SUB_PUSH).append(stashLine)
+            .append(ActionBars.spacer(-(SUB_PUSH + sw)));
         p.showTitle(net.kyori.adventure.title.Title.title(titleLine, subLine,
             net.kyori.adventure.title.Title.Times.times(
                 java.time.Duration.ZERO, java.time.Duration.ofMillis(1500), java.time.Duration.ZERO)));

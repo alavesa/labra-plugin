@@ -198,13 +198,26 @@ public final class LabraPlugin extends JavaPlugin {
                         // lab-datapack items: the plugin is the interface, the
                         // datapack functions stay the engine
                         case "kit", "rod", "pipette", "manual", "table",
-                             "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "credit", "credit10", "credit100",
+                             "scp009", "scp999", "scp207", "scp148", "scp500", "scp008",
                              "scp268", "scp1499", "scp714", "scp018", "scp427", "scp1033",
                              "ziptie", "handcuffs", "battery", "medkit", "scp005" -> {
                             if (!sender.hasPermission("lab.give")) return error(sender, "No permission.");
                             runAs(target, "lab:give/" + args[1].toLowerCase());
                             sender.sendMessage(Component.text("Gave lab " + args[1].toLowerCase()
                                 + " to " + target.getName(), NamedTextColor.AQUA));
+                        }
+                        // credits are built in-plugin (no datapack dependency)
+                        case "credit", "credit10", "credit100" -> {
+                            if (!sender.hasPermission("lab.give")) return error(sender, "No permission.");
+                            ItemStack cash = switch (args[1].toLowerCase()) {
+                                case "credit100" -> registry.buildCredit100();
+                                case "credit10" -> registry.buildCredit10();
+                                default -> registry.buildCredit();
+                            };
+                            target.getInventory().addItem(cash).values()
+                                .forEach(left -> target.getWorld().dropItemNaturally(target.getLocation(), left));
+                            sender.sendMessage(Component.text("Gave " + args[1].toLowerCase()
+                                + " to " + target.getName(), NamedTextColor.GOLD));
                         }
                         case "element" -> {
                             if (!sender.hasPermission("lab.give")) return error(sender, "No permission.");
@@ -462,7 +475,7 @@ public final class LabraPlugin extends JavaPlugin {
      *  own hazmat/geiger/sample). */
     private static final List<String> DATAPACK_ITEMS =
         List.of("kit", "rod", "pipette", "manual", "table", "element",
-            "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "credit", "credit10", "credit100",
+            "scp009", "scp999", "scp207", "scp148", "scp500", "scp008",
             "scp268", "scp1499", "scp714", "scp018", "scp427", "scp1033",
             "nvg", "ziptie", "handcuffs", "battery", "medkit", "scp005");
 

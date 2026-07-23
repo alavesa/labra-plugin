@@ -66,6 +66,32 @@ public final class LabRegistry {
     private final NamespacedKey chargeKey = new NamespacedKey("labra", "ext_charge");
 
     /** The held fire extinguisher: right-click sprays and puts out fire. Full. */
+    /** Physical credit cash - built in-plugin (no datapack dependency). Right-clicking
+     *  banks it into the credit balance (see CreditListener). */
+    public ItemStack buildCredit() {
+        return credit(Material.GOLD_NUGGET, "1 Credit", NamedTextColor.GOLD, "lab_credit",
+            "A credit coin. Right-click to deposit.");
+    }
+    public ItemStack buildCredit10() {
+        return credit(Material.PAPER, "10 Credits", NamedTextColor.GREEN, "lab_credit10",
+            "A 10-credit bill. Right-click to deposit.");
+    }
+    public ItemStack buildCredit100() {
+        return credit(Material.PAPER, "100 Credits", NamedTextColor.DARK_GREEN, "lab_credit100",
+            "A 100-credit stack. Right-click to deposit.");
+    }
+    private ItemStack credit(Material mat, String name, NamedTextColor color, String model, String lore) {
+        ItemStack item = new ItemStack(mat);
+        ItemMeta meta = item.getItemMeta();
+        meta.itemName(Component.text(name, color).decoration(TextDecoration.ITALIC, false));
+        meta.lore(List.of(Component.text(lore, NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false)));
+        CustomModelDataComponent cmd = meta.getCustomModelDataComponent();
+        cmd.setStrings(List.of(model));
+        meta.setCustomModelDataComponent(cmd);
+        item.setItemMeta(meta);
+        return item;
+    }
+
     public ItemStack buildExtinguisher() {
         ItemStack item = new ItemStack(Material.BRICK);
         ItemMeta meta = item.getItemMeta();
