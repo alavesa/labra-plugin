@@ -150,6 +150,7 @@ public final class FireManager implements Listener, Runnable {
             // blink short - so yield until the blink is over (blink lasts the same
             // whether or not headgear is worn).
             if (isBlinking(p)) continue;
+            if (usingMedkit(p)) continue;   // the medkit meter owns the title while treating
             String tier = registry.gasMaskTier(p.getInventory().getHelmet());
             if (tier == null) { nvgOverlay(p); continue; }
             char ch = switch (tier) { case "super" -> ''; case "heavy" -> ''; default -> ''; };
@@ -165,8 +166,17 @@ public final class FireManager implements Listener, Runnable {
     /** True while ScpMobs reports this player is mid-blink (lab.blinking == 1). The
      *  blink darkness is a title too, so the mask/NVG overlay must not overwrite it. */
     private boolean isBlinking(Player p) {
+        return flagSet(p, "lab.blinking");
+    }
+
+    /** True while DownedListener reports this player is mid-medkit (lab.medkit == 1). */
+    private boolean usingMedkit(Player p) {
+        return flagSet(p, "lab.medkit");
+    }
+
+    private boolean flagSet(Player p, String objective) {
         var board = Bukkit.getScoreboardManager().getMainScoreboard();
-        org.bukkit.scoreboard.Objective o = board.getObjective("lab.blinking");
+        org.bukkit.scoreboard.Objective o = board.getObjective(objective);
         if (o == null) return false;
         var score = o.getScore(p.getName());
         return score.isScoreSet() && score.getScore() >= 1;

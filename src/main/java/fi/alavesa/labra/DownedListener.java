@@ -113,10 +113,7 @@ public final class DownedListener implements Listener, Runnable {
         blood(victim, 24); // the moment of collapse leaves a mark
         victim.getWorld().playSound(victim.getLocation(), Sound.ENTITY_PLAYER_BIG_FALL, 1f, 0.6f);
         ActionBars.message(victim, line("You are down.", NamedTextColor.RED));
-        if (event instanceof EntityDamageByEntityEvent byEntity
-            && byEntity.getDamager() instanceof Player attacker) {
-            ActionBars.message(attacker, line("They're down. Finish it - or don't.", NamedTextColor.GRAY));
-        }
+        // (no "They're down. Finish it - or don't." popup for the attacker anymore)
     }
 
     /** Once a second: the crawl, the countdown, the clock running out. */
@@ -211,6 +208,49 @@ public final class DownedListener implements Listener, Runnable {
     }
 
     // ------------------------------------------------------------- the medkit
+
+    /**
+     * Per-tick while the medkit is being held (consumed): paint the "how long to hold"
+     * METER in the middle of the screen as a title + subtitle - the title says who
+     * you're treating (yourself or a downed player), the subtitle is a 10-segment bar
+     * that fills over the 3-second hold. Publishes lab.medkit=1 so the FireManager HUD
+     * yields the title line to us (no clashing with the credits/gas-mask overlays);
+     * cleared the instant the hold ends. Schedule this every ~2 ticks.
+     */
+    public void medkitTick() {
+        var board = org.bukkit.Bukkit.getScoreboardManager().getMainScoreboard();
+        org.bukkit.scoreboard.Objective obj = board.getObjective("lab.medkit");
+        if (obj == null) {
+            try {
+                obj = board.registerNewObjective("lab.medkit", org.bukkit.scoreboard.Criteria.DUMMY,
+                    net.kyori.adventure.text.Component.text("medkit"));
+            } catch (IllegalArgumentException e) { obj = board.getObjective("lab.medkit"); }
+        }
+        for (Player p : plugin.getServer().getOnlinePlayers()) {
+            boolean using = p.isHandRaised() && isMedkit(p.getActiveItem());
+            if (!using) {
+                if (obj != null) obj.getScoreboard().resetScores(p.getName());
+                continue;
+            }
+            if (obj != null) obj.getScore(p.getName()).setScore(1);
+            float progress = Math.max(0f, Math.min(1f, p.getHandRaisedTime() / 60f));   // 3s = 60t
+            Entity tgt = p.getTargetEntity(4);
+            boolean onOther = tgt instanceof Player tp && tp != p && isDowned(tp);
+            String who = onOther ? ((Player) tgt).getName() : "yourself";
+            int seg = Math.round(progress * 10);
+            net.kyori.adventure.text.Component bar = net.kyori.adventure.text.Component
+                .text("▰".repeat(Math.max(0, seg)), NamedTextColor.GREEN)
+                .append(net.kyori.adventure.text.Component.text("▱".repeat(Math.max(0, 10 - seg)),
+                    NamedTextColor.DARK_GRAY));
+            net.kyori.adventure.text.Component title = net.kyori.adventure.text.Component
+                .text("Treating ", NamedTextColor.WHITE)
+                .append(net.kyori.adventure.text.Component.text(who,
+                    onOther ? NamedTextColor.AQUA : NamedTextColor.GREEN));
+            p.showTitle(net.kyori.adventure.title.Title.title(title, bar,
+                net.kyori.adventure.title.Title.Times.times(java.time.Duration.ZERO,
+                    java.time.Duration.ofMillis(400), java.time.Duration.ZERO)));
+        }
+    }
 
     /** The 3-second medkit hold completes as a "consume" - never eaten. */
     @EventHandler

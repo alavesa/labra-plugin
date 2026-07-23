@@ -86,6 +86,7 @@ public final class LabraPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(dying, this);
         getServer().getScheduler().runTaskTimer(this, dying, 40L, 20L);
         getServer().getScheduler().runTaskTimer(this, dying::crawlTick, 40L, 3L);
+        getServer().getScheduler().runTaskTimer(this, dying::medkitTick, 40L, 2L);
         getServer().getScheduler().runTaskTimer(this, new HazardTask(this, registry), 40L, 20L);
         getServer().getScheduler().runTaskTimer(this, new GeigerTask(this, registry), 40L, 5L);
         getServer().getScheduler().runTaskTimer(this, scp268, 40L, 20L);
