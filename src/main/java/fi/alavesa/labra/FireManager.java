@@ -195,6 +195,11 @@ public final class FireManager implements Listener, Runnable {
      */
     private void renderTitleHud(Player p) {
         if (isBlinking(p)) return;
+        // Spectators are ALWAYS in a menu/CCTV/admin state where the title layer belongs to
+        // something else (the lobby menu locks players into spectator). Yielding on the
+        // gamemode is flag-independent, so the credits HUD can never overwrite the menu
+        // background again - the flag check below is just a belt-and-braces extra.
+        if (p.getGameMode() == GameMode.SPECTATOR) return;
         if (inMenu(p)) return;
         overlayShown.add(p.getUniqueId());
 
