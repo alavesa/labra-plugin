@@ -29,6 +29,7 @@ public final class LabraPlugin extends JavaPlugin {
     private Scp268Listener scp268;
     private Scp018Listener scp018;
     private FireManager fire;
+    private CreditHud creditHud;
 
     @Override
     public void onEnable() {
@@ -67,6 +68,9 @@ public final class LabraPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(scp038, this);
         getServer().getScheduler().runTaskTimer(this, scp038, 40L, 20L);
         getServer().getPluginManager().registerEvents(new Trinkets(), this);
+        getServer().getPluginManager().registerEvents(new CreditListener(), this);
+        creditHud = new CreditHud(this);
+        getServer().getScheduler().runTaskTimer(this, creditHud, 40L, 10L);
         NvgListener nvg = new NvgListener(this, registry);
         getServer().getPluginManager().registerEvents(nvg, this);
         getServer().getScheduler().runTaskTimer(this, nvg, 40L, 20L);
@@ -108,10 +112,62 @@ public final class LabraPlugin extends JavaPlugin {
         if (hud != null) hud.shutdown();
         if (scp268 != null) scp268.shutdown();
         if (scp018 != null) scp018.shutdown();
+        if (creditHud != null) creditHud.shutdown();
+    }
+
+    /** /credits - check or move the credit balance. */
+    private boolean handleCredits(CommandSender sender, String[] args) {
+        if (args.length == 0) {
+            if (!(sender instanceof Player p)) return error(sender, "Players only.");
+            sender.sendMessage(Component.text("Balance: " + Credits.balance(p) + " credits   "
+                + "| Stash: " + Credits.stash(p) + " credits", NamedTextColor.GOLD));
+            return true;
+        }
+        String sub = args[0].toLowerCase();
+        switch (sub) {
+            case "pay" -> {
+                if (!(sender instanceof Player p)) return error(sender, "Players only.");
+                if (args.length < 3) return error(sender, "/credits pay <player> <amount>");
+                Player target = Bukkit.getPlayerExact(args[1]);
+                if (target == null) return error(sender, "Player not found.");
+                int amt = parseAmount(args[2]);
+                if (amt <= 0) return error(sender, "Amount must be a positive number.");
+                if (!Credits.take(p, amt)) return error(sender, "Not enough credits (you have "
+                    + Credits.balance(p) + ").");
+                Credits.add(target, amt);
+                sender.sendMessage(Component.text("Paid " + amt + " credits to " + target.getName()
+                    + ". Balance: " + Credits.balance(p), NamedTextColor.GOLD));
+                target.sendMessage(Component.text("Received " + amt + " credits from " + p.getName()
+                    + ". Balance: " + Credits.balance(target), NamedTextColor.GOLD));
+                return true;
+            }
+            case "give", "set" -> {
+                if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
+                if (args.length < 3) return error(sender, "/credits " + sub + " <player> <amount>");
+                Player target = Bukkit.getPlayerExact(args[1]);
+                if (target == null) return error(sender, "Player not found.");
+                int amt = parseAmount(args[2]);
+                if (amt < 0) return error(sender, "Amount must be a number.");
+                if (sub.equals("set")) Credits.setBalance(target, amt); else Credits.add(target, amt);
+                sender.sendMessage(Component.text(target.getName() + " now has "
+                    + Credits.balance(target) + " credits.", NamedTextColor.GOLD));
+                return true;
+            }
+            default -> {
+                sender.sendMessage(Component.text("/credits | pay <player> <amount> | give/set <player> <amount>",
+                    NamedTextColor.GOLD));
+                return true;
+            }
+        }
+    }
+
+    private int parseAmount(String s) {
+        try { return Integer.parseInt(s.trim()); } catch (NumberFormatException e) { return -1; }
     }
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (command.getName().equalsIgnoreCase("credits")) return handleCredits(sender, args);
         if (args.length == 0) return usage(sender);
         try {
             switch (args[0].toLowerCase()) {
@@ -145,7 +201,7 @@ public final class LabraPlugin extends JavaPlugin {
                         // lab-datapack items: the plugin is the interface, the
                         // datapack functions stay the engine
                         case "kit", "rod", "pipette", "manual", "table",
-                             "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "quarter",
+                             "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "credit", "credit10", "credit100",
                              "scp268", "scp1499", "scp714", "scp018", "scp427", "scp1033",
                              "ziptie", "handcuffs", "battery", "medkit", "scp005" -> {
                             if (!sender.hasPermission("lab.give")) return error(sender, "No permission.");
@@ -380,7 +436,7 @@ public final class LabraPlugin extends JavaPlugin {
                 case "give" -> filter(Stream.of("hazmat", "geiger", "sample", "extinguisher",
                     "gasmask", "supergasmask", "heavygasmask", "kit", "rod",
                     "pipette", "manual", "table", "element",
-                    "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "quarter",
+                    "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "credit", "credit10", "credit100",
                     "scp268", "scp1499", "scp714", "scp018", "scp427", "scp1033",
                     "nvg", "nvgred", "nvgblue", "ziptie", "handcuffs", "battery", "medkit", "scp005"), args[1]);
                 case "zone" -> filter(Stream.of("add", "remove", "list", "alarm"), args[1]);
@@ -409,7 +465,7 @@ public final class LabraPlugin extends JavaPlugin {
      *  own hazmat/geiger/sample). */
     private static final List<String> DATAPACK_ITEMS =
         List.of("kit", "rod", "pipette", "manual", "table", "element",
-            "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "quarter",
+            "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "credit", "credit10", "credit100",
             "scp268", "scp1499", "scp714", "scp018", "scp427", "scp1033",
             "nvg", "ziptie", "handcuffs", "battery", "medkit", "scp005");
 

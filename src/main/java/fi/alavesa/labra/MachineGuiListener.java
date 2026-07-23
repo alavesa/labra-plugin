@@ -236,7 +236,7 @@ public final class MachineGuiListener implements Listener {
             meta.setColor(org.bukkit.Color.fromRGB(liquid.color()));
             meta.itemName(Component.text("Dispense: " + liquid.name(), NamedTextColor.WHITE)
                 .decoration(TextDecoration.ITALIC, false));
-            meta.lore(List.of(Component.text("Click to pay 2 Quarters.", NamedTextColor.GRAY)
+            meta.lore(List.of(Component.text("Click to pay 2 credits.", NamedTextColor.GRAY)
                 .decoration(TextDecoration.ITALIC, false)));
             meta.addItemFlags(org.bukkit.inventory.ItemFlag.HIDE_ADDITIONAL_TOOLTIP);
             cup.setItemMeta(meta);
@@ -281,8 +281,9 @@ public final class MachineGuiListener implements Listener {
             if (event.getSlot() != 2 || session.matched == null) return;
             Entity machine = Bukkit.getEntity(session.machine);
             if (machine == null) { player.closeInventory(); return; }
-            if (!takeQuarters(player, 2)) {
-                ActionBars.message(player, Component.text("SCP-294 requires two Quarters.", NamedTextColor.GRAY));
+            if (!Credits.take(player, 2)) {
+                ActionBars.message(player, Component.text("SCP-294 requires 2 credits (you have "
+                    + Credits.balance(player) + ").", NamedTextColor.GRAY));
                 player.playSound(player.getLocation(), org.bukkit.Sound.BLOCK_DISPENSER_FAIL, 0.7f, 0.9f);
                 return;
             }

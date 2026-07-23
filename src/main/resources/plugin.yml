@@ -17,6 +17,14 @@ commands:
       /lab zone remove <name> | list | alarm <name> on|off
       /lab reload
     aliases: [labra]
+  credits:
+    description: Check or move your credit balance
+    usage: |
+      /credits              - show your balance (and stash)
+      /credits pay <player> <amount>
+      /credits give <player> <amount>   (op)
+      /credits set <player> <amount>    (op)
+    aliases: [balance, bal, money]
 permissions:
   lab.give:
     description: Get lab items (staff only on RP servers)
