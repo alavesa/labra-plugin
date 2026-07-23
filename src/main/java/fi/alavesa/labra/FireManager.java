@@ -172,13 +172,34 @@ public final class FireManager implements Listener, Runnable {
         return score.isScoreSet() && score.getScore() >= 1;
     }
 
-    /** The full-screen headgear overlay, painted as the TITLE glyph. A title renders
-     *  at ~4x scale, which is what makes the custom-textured glyph FILL the screen -
-     *  a subtitle renders at ~half that, which shrank the overlay to a small circle.
-     *  Re-sent while the mask/NVG is worn. */
+    /** How far right of centre the credits/stash readout is pushed (px). Tune this
+     *  one value if it doesn't sit in the top-right corner on your GUI scale. */
+    private static final int HUD_PUSH = 118;
+
+    /**
+     * The unified title HUD: the full-screen headgear glyph (mask/NVG, if worn) sits
+     * centred on the TITLE line, while the CREDITS readout rides the same title line
+     * pushed to the TOP-RIGHT (net-zero, so it never shifts the mask), and the STASH
+     * total rides the SUBTITLE line just under it. A title renders at ~4x scale so the
+     * headgear glyph fills the screen; the credits use the lab:hud spacer font to
+     * right-align. All in one title send, so credits + mask coexist instead of
+     * fighting for the title line. glyph = Component.empty() when no headgear is worn.
+     */
     private void showTitleGlyph(Player p, Component glyph) {
         overlayShown.add(p.getUniqueId());
-        p.showTitle(net.kyori.adventure.title.Title.title(glyph, Component.empty(),
+        Component credits = Component.text("❈ ", NamedTextColor.YELLOW)
+            .append(Component.text(Credits.balance(p) + " credits", NamedTextColor.GOLD));
+        Component stashLine = Component.text("⌂ ", NamedTextColor.AQUA)
+            .append(Component.text(Credits.stash(p) + " in stash", NamedTextColor.AQUA));
+        int cw = ActionBars.width(credits);
+        int sw = ActionBars.width(stashLine);
+        // push right, draw, then rewind the full width -> the readout contributes 0 to
+        // the title's centring, so the headgear glyph stays centred
+        Component titleLine = ActionBars.spacer(HUD_PUSH).append(credits)
+            .append(ActionBars.spacer(-(HUD_PUSH + cw))).append(glyph);
+        Component subLine = ActionBars.spacer(HUD_PUSH).append(stashLine)
+            .append(ActionBars.spacer(-(HUD_PUSH + sw)));
+        p.showTitle(net.kyori.adventure.title.Title.title(titleLine, subLine,
             net.kyori.adventure.title.Title.Times.times(
                 java.time.Duration.ZERO, java.time.Duration.ofMillis(1500), java.time.Duration.ZERO)));
     }
@@ -187,7 +208,7 @@ public final class FireManager implements Listener, Runnable {
     private void nvgOverlay(Player p) {
         String nvg = registry.nvgType(p.getInventory().getHelmet());
         if (nvg == null) {
-            if (overlayShown.remove(p.getUniqueId())) p.clearTitle();
+            showTitleGlyph(p, Component.empty());   // no headgear: still show the credits HUD
             return;
         }
         char ch = switch (nvg) { case "red" -> ''; case "blue" -> ''; default -> ''; };

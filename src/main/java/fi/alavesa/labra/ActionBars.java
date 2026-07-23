@@ -261,6 +261,12 @@ public final class ActionBars {
         player.sendActionBar(out);
     }
 
+    /** Public: a horizontal pixel offset in the lab:hud font (for other HUDs to
+     *  position text, e.g. the top-right credits readout). */
+    public static Component spacer(int pixels) { return advance(pixels); }
+    /** Public: default-font pixel width of a component (for right-aligning). */
+    public static int width(Component component) { return pixelWidth(component); }
+
     /** Compose any pixel offset from the hud font's power-of-two spaces. */
     private static Component advance(int pixels) {
         StringBuilder chars = new StringBuilder();

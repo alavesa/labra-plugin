@@ -29,7 +29,6 @@ public final class LabraPlugin extends JavaPlugin {
     private Scp268Listener scp268;
     private Scp018Listener scp018;
     private FireManager fire;
-    private CreditHud creditHud;
 
     @Override
     public void onEnable() {
@@ -69,8 +68,7 @@ public final class LabraPlugin extends JavaPlugin {
         getServer().getScheduler().runTaskTimer(this, scp038, 40L, 20L);
         getServer().getPluginManager().registerEvents(new Trinkets(), this);
         getServer().getPluginManager().registerEvents(new CreditListener(), this);
-        creditHud = new CreditHud(this);
-        getServer().getScheduler().runTaskTimer(this, creditHud, 40L, 10L);
+        // credits/stash HUD is rendered as a top-right title by FireManager.maskTick
         NvgListener nvg = new NvgListener(this, registry);
         getServer().getPluginManager().registerEvents(nvg, this);
         getServer().getScheduler().runTaskTimer(this, nvg, 40L, 20L);
@@ -112,7 +110,6 @@ public final class LabraPlugin extends JavaPlugin {
         if (hud != null) hud.shutdown();
         if (scp268 != null) scp268.shutdown();
         if (scp018 != null) scp018.shutdown();
-        if (creditHud != null) creditHud.shutdown();
     }
 
     /** /credits - check or move the credit balance. */
