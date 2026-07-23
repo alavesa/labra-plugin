@@ -389,9 +389,25 @@ public final class LabraPlugin extends JavaPlugin {
                     return true;
                 }
                 case "hud" -> {
+                    // /lab hud                      -> toggle the vitals meters for yourself
+                    // /lab hud credits <x>          -> move the money HUD (px right of centre)
+                    // /lab hud meters <x>           -> move the blink+sprint meters (px left of centre)
+                    if (args.length >= 3 && (args[1].equalsIgnoreCase("credits") || args[1].equalsIgnoreCase("meters"))) {
+                        if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
+                        int x;
+                        try { x = Integer.parseInt(args[2]); } catch (NumberFormatException e) {
+                            return error(sender, "Offset must be a whole number of pixels.");
+                        }
+                        String key = args[1].equalsIgnoreCase("credits") ? "hud.credits-x" : "hud.meters-x";
+                        getConfig().set(key, x);
+                        saveConfig();
+                        sender.sendMessage(Component.text(key + " = " + x + " (live).", NamedTextColor.AQUA));
+                        return true;
+                    }
                     if (!(sender instanceof Player player)) return error(sender, "Players only.");
                     hud.toggle(player);
-                    sender.sendMessage(Component.text("Vitals HUD toggled.", NamedTextColor.AQUA));
+                    sender.sendMessage(Component.text("Vitals HUD toggled. Offsets: /lab hud credits <x> | meters <x>",
+                        NamedTextColor.AQUA));
                     return true;
                 }
                 case "menu" -> {

@@ -204,28 +204,29 @@ public final class FireManager implements Listener, Runnable {
         overlayShown.add(p.getUniqueId());
 
         Component glyph = headgearGlyph(p);
-        // lab:hi renders these small but LIFTED high (its glyphs carry a big ascent), so the
-        // readout sits up toward the top-right corner instead of the middle of the screen.
+        // ONE money total: everything you own, the cash in your pockets PLUS your stashes.
+        // lab:hi renders it small but LIFTED high (big font ascent), toward the top-right.
         net.kyori.adventure.key.Key hi = net.kyori.adventure.key.Key.key("lab", "hi");
-        Component credits = Component.text("$" + Credits.wallet(p), NamedTextColor.GOLD).font(hi);
-        Component stashLine = Component.text("Stash $" + Credits.stash(p), NamedTextColor.AQUA).font(hi);
+        int total = Credits.wallet(p) + Credits.stash(p);
+        Component credits = Component.text("$" + total, NamedTextColor.GOLD).font(hi);
         int cw = ActionBars.width(credits);
-        int sw = ActionBars.width(stashLine);
+        int pushX = plugin.getConfig().getInt("hud.credits-x", 40);   // operator-tunable
 
-        Component titleLine = ActionBars.spacer(TITLE_PUSH).append(credits)
-            .append(ActionBars.spacer(-(TITLE_PUSH + cw)));
+        Component titleLine = ActionBars.spacer(pushX).append(credits)
+            .append(ActionBars.spacer(-(pushX + cw)));
         if (glyph != null) {
             titleLine = titleLine.append(ActionBars.spacer(-GLYPH_ADVANCE / 2)).append(glyph)
                 .append(ActionBars.spacer(-GLYPH_ADVANCE / 2));
         }
 
-        Component subLine = ActionBars.spacer(SUB_PUSH).append(stashLine)
-            .append(ActionBars.spacer(-(SUB_PUSH + sw)));
+        // Subtitle carries only the medkit meter, centred. Force the DEFAULT font on it -
+        // otherwise it inherits the lab:hud spacer font and renders as tofu boxes.
+        Component subLine = Component.empty();
         Component meter = DownedListener.medkitMeter(p.getUniqueId());
         if (meter != null) {
+            meter = meter.font(net.kyori.adventure.key.Key.key("minecraft", "default"));
             int mw = ActionBars.width(meter);
-            subLine = subLine.append(ActionBars.spacer(-mw / 2)).append(meter)
-                .append(ActionBars.spacer(-mw / 2));
+            subLine = ActionBars.spacer(-mw / 2).append(meter).append(ActionBars.spacer(-mw / 2));
         }
 
         p.showTitle(net.kyori.adventure.title.Title.title(titleLine, subLine,
