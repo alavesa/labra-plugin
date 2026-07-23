@@ -129,6 +129,11 @@ public final class LabMenu implements Listener {
             "lab extinguisher mount", null));
         list.add(new Entry(Material.LEVER, "Place: Sprinkler button", NamedTextColor.YELLOW,
             "lab sprinkler button", null));
+        // --- facility fixtures & personal gear
+        list.add(new Entry(Material.SPAWNER, "Place: Personal stash", NamedTextColor.YELLOW,
+            "stash place", null));
+        list.add(new Entry(Material.PAPER, "Give: Identification card", NamedTextColor.AQUA,
+            "idcard give", null));
         // --- placeable machines
         for (String machine : List.of("creator", "burner", "centrifuge", "fridge",
             "rack", "scp294", "scp038")) {

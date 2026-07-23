@@ -151,6 +151,7 @@ public final class FireManager implements Listener, Runnable {
             // whether or not headgear is worn).
             if (isBlinking(p)) continue;
             if (usingMedkit(p)) continue;   // the medkit meter owns the title while treating
+            if (inMenu(p)) continue;   // the facility menu owns the title layer; don't fight it
             String tier = registry.gasMaskTier(p.getInventory().getHelmet());
             if (tier == null) { nvgOverlay(p); continue; }
             char ch = switch (tier) { case "super" -> ''; case "heavy" -> ''; default -> ''; };
@@ -172,6 +173,13 @@ public final class FireManager implements Listener, Runnable {
     /** True while DownedListener reports this player is mid-medkit (lab.medkit == 1). */
     private boolean usingMedkit(Player p) {
         return flagSet(p, "lab.medkit");
+    }
+
+    /** True while Facility reports the player has the main menu GUI open (facility.menu
+     *  == 1). The menu paints its own background on the title layer, so the credits
+     *  title must yield or it overwrites the menu overlay. */
+    private boolean inMenu(Player p) {
+        return flagSet(p, "facility.menu");
     }
 
     private boolean flagSet(Player p, String objective) {
@@ -754,6 +762,18 @@ public final class FireManager implements Listener, Runnable {
             d.setTransformation(new Transformation(new Vector3f(0, 0, 0),
                 rot, new Vector3f(0.7f, 0.7f, 0.7f), new org.joml.Quaternionf()));
         });
+    }
+
+    /** Op PUNCH on an extinguisher mount breaks it (bracket + can). Uses the arm-swing
+     *  animation, which fires reliably when left-clicking an Interaction entity. */
+    @EventHandler
+    public void onMountPunch(org.bukkit.event.player.PlayerAnimationEvent event) {
+        if (event.getAnimationType() != org.bukkit.event.player.PlayerAnimationType.ARM_SWING) return;
+        Player p = event.getPlayer();
+        if (!p.hasPermission("lab.admin") && !p.isOp()) return;
+        if (!removeMount(p)) return;
+        p.sendActionBar(Component.text("Extinguisher mount removed.", NamedTextColor.GRAY));
+        p.getWorld().playSound(p.getLocation(), Sound.ENTITY_ITEM_BREAK, 0.8f, 0.9f);
     }
 
     @EventHandler
