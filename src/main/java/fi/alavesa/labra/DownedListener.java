@@ -239,22 +239,14 @@ public final class DownedListener implements Listener, Runnable {
             Entity tgt = p.getTargetEntity(4);
             boolean onOther = tgt instanceof Player tp && tp != p && isDowned(tp);
             String who = onOther ? ((Player) tgt).getName() : "yourself";
-            int seg = Math.round(progress * 10);
-            // A plain ASCII bar so it renders as a bar on every client (the block glyphs
-            // showed up as tofu boxes) - "[==== ]" filling over the 3-second hold.
-            net.kyori.adventure.text.Component bar = net.kyori.adventure.text.Component
-                .text("[", NamedTextColor.GRAY)
-                .append(net.kyori.adventure.text.Component.text("=".repeat(Math.max(0, seg)), NamedTextColor.GREEN))
-                .append(net.kyori.adventure.text.Component.text(" ".repeat(Math.max(0, 10 - seg)), NamedTextColor.DARK_GRAY))
-                .append(net.kyori.adventure.text.Component.text("]", NamedTextColor.GRAY));
-            // Publish one compact meter line; FireManager composes it into the SAME title
-            // send as the credits, so it can never trade places with the currency HUD.
+            int pct = Math.round(progress * 100);
+            // Plain text only - no bar glyphs of any kind. "Treating X  70%" counting up
+            // over the 3-second hold. Published for FireManager to compose with the credits.
             net.kyori.adventure.text.Component meter = net.kyori.adventure.text.Component
                 .text("Treating ", NamedTextColor.WHITE)
                 .append(net.kyori.adventure.text.Component.text(who,
                     onOther ? NamedTextColor.AQUA : NamedTextColor.GREEN))
-                .append(net.kyori.adventure.text.Component.text("  ", NamedTextColor.WHITE))
-                .append(bar);
+                .append(net.kyori.adventure.text.Component.text("  " + pct + "%", NamedTextColor.GREEN));
             MEDKIT_METER.put(id, meter);
         }
     }

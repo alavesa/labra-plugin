@@ -73,12 +73,11 @@ public final class SprintManager implements Runnable, Listener {
             double s = stamina.getOrDefault(id, MAX);
             boolean wind = winded.getOrDefault(id, false);
 
-            // Sprint is governed by THIS stamina bar, not vanilla hunger. Vanilla
-            // refuses to sprint (and auto-stops it) once food drops to 6 or below,
-            // which is what made a full bar sometimes not let you run, and made the
-            // drain miss (isSprinting flickering off). Keep food above that gate so
-            // stamina is the only thing that decides whether you can sprint.
-            if (player.getFoodLevel() < 7) player.setFoodLevel(7);
+            // Sprint is governed by THIS stamina bar. Vanilla refuses to sprint once food
+            // drops to 6 or below - so while NOT winded we keep food above that gate (stamina
+            // decides), and while WINDED we deliberately DROP it to 6 to lock sprinting off
+            // the vanilla way (setSprinting(false) alone doesn't hold - the client re-sends it).
+            if (!wind && player.getFoodLevel() < 7) player.setFoodLevel(7);
 
             boolean sprinting = player.isSprinting() && !wind;
             if (sprinting) {
@@ -86,27 +85,23 @@ public final class SprintManager implements Runnable, Listener {
                 if (s <= 0) {
                     s = 0;
                     wind = true;
-                    windedTicks.put(id, WINDED_TICKS);        // 2s locked out of running
                     player.setSprinting(false);
-                    // Slowness II for 2 seconds sells the exhaustion; running stays locked
-                    // (winded) until the bar climbs back over RECOVER_AT below.
+                    // Slowness II for 2 seconds sells the exhaustion.
                     player.addPotionEffect(new PotionEffect(
                         PotionEffectType.SLOWNESS, WINDED_TICKS, 1, true, false, false));
                 }
             } else {
                 s = Math.min(MAX, s + REGEN);
             }
-            // Run the 3-second wind-down: they can't run at all while it lasts, and
-            // only recover afterwards once the bar has climbed back over the threshold.
-            int wt = windedTicks.getOrDefault(id, 0);
-            if (wt > 0) {
-                windedTicks.put(id, Math.max(0, wt - TICK_PERIOD));
-                wind = true;
+            // Winded: locked out of running until the bar climbs back over the threshold.
+            // Hold it with the vanilla food gate (<=6) so it actually sticks, plus a belt.
+            if (wind) {
                 player.setSprinting(false);
-            } else if (wind && s >= RECOVER_AT) {
-                wind = false;
-            } else if (wind) {
-                player.setSprinting(false);   // still winded (bar too low) - hold at a walk
+                if (player.getFoodLevel() > 6) player.setFoodLevel(6);
+                if (s >= RECOVER_AT) {
+                    wind = false;
+                    if (player.getFoodLevel() < 7) player.setFoodLevel(7);
+                }
             }
             stamina.put(id, s);
             winded.put(id, wind);

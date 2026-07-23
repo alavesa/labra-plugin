@@ -204,8 +204,11 @@ public final class FireManager implements Listener, Runnable {
         overlayShown.add(p.getUniqueId());
 
         Component glyph = headgearGlyph(p);
-        Component credits = Component.text("$" + Credits.wallet(p), NamedTextColor.GOLD);
-        Component stashLine = Component.text("Stash $" + Credits.stash(p), NamedTextColor.AQUA);
+        // lab:hi renders these small but LIFTED high (its glyphs carry a big ascent), so the
+        // readout sits up toward the top-right corner instead of the middle of the screen.
+        net.kyori.adventure.key.Key hi = net.kyori.adventure.key.Key.key("lab", "hi");
+        Component credits = Component.text("$" + Credits.wallet(p), NamedTextColor.GOLD).font(hi);
+        Component stashLine = Component.text("Stash $" + Credits.stash(p), NamedTextColor.AQUA).font(hi);
         int cw = ActionBars.width(credits);
         int sw = ActionBars.width(stashLine);
 
