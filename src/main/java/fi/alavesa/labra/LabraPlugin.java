@@ -34,6 +34,7 @@ public final class LabraPlugin extends JavaPlugin {
     public void onEnable() {
         ActionBars.start(this);
         registry = new LabRegistry(this);
+        Credits.attach(registry);   // currency mints change/cash from the registry's builders
         registry.load();
         machineGuis = new MachineGuiListener(this);
         getServer().getPluginManager().registerEvents(machineGuis, this);
@@ -61,7 +62,7 @@ public final class LabraPlugin extends JavaPlugin {
         getServer().getScheduler().runTaskTimer(this, fire::noxiousTick, 40L, 20L);      // smoke harm every second
         getServer().getScheduler().runTaskTimer(this, fire::spreadTick, 40L, 6L);        // burning players trail fire
         getServer().getScheduler().runTaskTimer(this, fire::ductSpreadTick, 60L, 40L);   // fire creeps through ducts
-        getServer().getScheduler().runTaskTimer(this, fire::maskTick, 40L, 10L);          // gas-mask overlay per tier
+        getServer().getScheduler().runTaskTimer(this, fire::maskTick, 40L, 2L);           // unified title HUD (credits/stash/medkit/mask)
         getServer().getScheduler().runTaskTimer(this, fire::temperatureTick, 40L, 10L);   // body heat near fire (0.1C/step)
         Scp038Listener scp038 = new Scp038Listener(this);
         getServer().getPluginManager().registerEvents(scp038, this);
@@ -117,7 +118,7 @@ public final class LabraPlugin extends JavaPlugin {
     private boolean handleCredits(CommandSender sender, String[] args) {
         if (args.length == 0) {
             if (!(sender instanceof Player p)) return error(sender, "Players only.");
-            sender.sendMessage(Component.text("Balance: " + Credits.balance(p) + " credits   "
+            sender.sendMessage(Component.text("Wallet: " + Credits.wallet(p) + " credits   "
                 + "| Stash: " + Credits.stash(p) + " credits", NamedTextColor.GOLD));
             return true;
         }
@@ -130,13 +131,13 @@ public final class LabraPlugin extends JavaPlugin {
                 if (target == null) return error(sender, "Player not found.");
                 int amt = parseAmount(args[2]);
                 if (amt <= 0) return error(sender, "Amount must be a positive number.");
-                if (!Credits.take(p, amt)) return error(sender, "Not enough credits (you have "
-                    + Credits.balance(p) + ").");
-                Credits.add(target, amt);
+                if (!Credits.spend(p, amt)) return error(sender, "Not enough credits (you have "
+                    + Credits.wallet(p) + ").");
+                Credits.give(target, amt);
                 sender.sendMessage(Component.text("Paid " + amt + " credits to " + target.getName()
-                    + ". Balance: " + Credits.balance(p), NamedTextColor.GOLD));
+                    + ". Wallet: " + Credits.wallet(p), NamedTextColor.GOLD));
                 target.sendMessage(Component.text("Received " + amt + " credits from " + p.getName()
-                    + ". Balance: " + Credits.balance(target), NamedTextColor.GOLD));
+                    + ". Wallet: " + Credits.wallet(target), NamedTextColor.GOLD));
                 return true;
             }
             case "give", "set" -> {
@@ -146,9 +147,10 @@ public final class LabraPlugin extends JavaPlugin {
                 if (target == null) return error(sender, "Player not found.");
                 int amt = parseAmount(args[2]);
                 if (amt < 0) return error(sender, "Amount must be a number.");
-                if (sub.equals("set")) Credits.setBalance(target, amt); else Credits.add(target, amt);
-                sender.sendMessage(Component.text(target.getName() + " now has "
-                    + Credits.balance(target) + " credits.", NamedTextColor.GOLD));
+                if (sub.equals("set")) Credits.clearCash(target);   // set = wipe cash then hand out exact
+                Credits.give(target, amt);
+                sender.sendMessage(Component.text(target.getName() + " now carries "
+                    + Credits.wallet(target) + " credits.", NamedTextColor.GOLD));
                 return true;
             }
             default -> {

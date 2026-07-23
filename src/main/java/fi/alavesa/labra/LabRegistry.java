@@ -70,15 +70,15 @@ public final class LabRegistry {
      *  banks it into the credit balance (see CreditListener). */
     public ItemStack buildCredit() {
         return credit(Material.GOLD_NUGGET, "1 Credit", NamedTextColor.GOLD, "lab_credit",
-            "A credit coin. Right-click to deposit.");
+            "A credit coin. Carry it to spend it.");
     }
     public ItemStack buildCredit10() {
         return credit(Material.PAPER, "10 Credits", NamedTextColor.GREEN, "lab_credit10",
-            "A 10-credit bill. Right-click to deposit.");
+            "A 10-credit bill. Carry it to spend it.");
     }
     public ItemStack buildCredit100() {
         return credit(Material.PAPER, "100 Credits", NamedTextColor.DARK_GREEN, "lab_credit100",
-            "A 100-credit stack. Right-click to deposit.");
+            "A 100-credit stack. Carry it to spend it.");
     }
     private ItemStack credit(Material mat, String name, NamedTextColor color, String model, String lore) {
         ItemStack item = new ItemStack(mat);

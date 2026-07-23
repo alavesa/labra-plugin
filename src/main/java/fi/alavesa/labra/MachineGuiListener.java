@@ -281,9 +281,9 @@ public final class MachineGuiListener implements Listener {
             if (event.getSlot() != 2 || session.matched == null) return;
             Entity machine = Bukkit.getEntity(session.machine);
             if (machine == null) { player.closeInventory(); return; }
-            if (!Credits.take(player, 2)) {
+            if (!Credits.spend(player, 2)) {
                 ActionBars.message(player, Component.text("SCP-294 requires 2 credits (you have "
-                    + Credits.balance(player) + ").", NamedTextColor.GRAY));
+                    + Credits.wallet(player) + ").", NamedTextColor.GRAY));
                 player.playSound(player.getLocation(), org.bukkit.Sound.BLOCK_DISPENSER_FAIL, 0.7f, 0.9f);
                 return;
             }

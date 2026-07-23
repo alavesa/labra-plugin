@@ -51,14 +51,21 @@ public final class ActionBars {
      *  Re-sent every tick by Guns while a gun is held. */
     private record Reticle(Component glyph, int width, long until) { }
 
+    /** A centered interact-crosshair highlight (Facility's corner-bracket frame): composed
+     *  like the reticle so hovering an interactable never erases the blink/sprint meters
+     *  or a held gun's reticle. Re-sent every couple of ticks by Facility while hovering. */
+    private record Crosshair(Component glyph, int width, long until) { }
+
     private static final Map<UUID, State> STATES = new ConcurrentHashMap<>();
     private static final Map<UUID, Meters> METERS = new ConcurrentHashMap<>();
     private static final Map<UUID, Mask> MASKS = new ConcurrentHashMap<>();
     private static final Map<UUID, Reticle> RETICLES = new ConcurrentHashMap<>();
+    private static final Map<UUID, Crosshair> CROSSHAIRS = new ConcurrentHashMap<>();
     private static final long TRANSIENT_MS = 4000;
     private static final long METERS_MS = 500;
     private static final long MASK_MS = 500;
     private static final long RETICLE_MS = 500;
+    private static final long CROSSHAIR_MS = 500;
     /** The top line goes stale fast: its owner (the speedometer) re-sends it
      *  every tick while it's relevant, so it disappears within a couple of
      *  ticks of the driver letting go instead of lingering for seconds. */
@@ -92,7 +99,13 @@ public final class ActionBars {
                     RETICLES.remove(player.getUniqueId());
                     reticle = null;
                 }
-                if (state == null && meters == null && mask == null && reticle == null) continue;
+                Crosshair crosshair = CROSSHAIRS.get(player.getUniqueId());
+                if (crosshair != null && crosshair.until() < now) {
+                    CROSSHAIRS.remove(player.getUniqueId());
+                    crosshair = null;
+                }
+                if (state == null && meters == null && mask == null && reticle == null
+                    && crosshair == null) continue;
                 render(player);
             }
         }, 40L, 10L);
@@ -189,15 +202,30 @@ public final class ActionBars {
         RETICLES.remove(player.getUniqueId());
     }
 
+    /** The Facility interact-crosshair: {@code glyph} is a facility:crosshair frame glyph
+     *  (its font ascent lifts it to the crosshair); {@code width} is its rendered pixel
+     *  advance. Re-send every couple of ticks while hovering an interactable; it centers
+     *  and composes with the meters/mask/reticle instead of erasing them. */
+    public static void crosshair(Player player, Component glyph, int width) {
+        CROSSHAIRS.put(player.getUniqueId(), new Crosshair(glyph, width, System.currentTimeMillis() + CROSSHAIR_MS));
+        render(player);
+    }
+
+    public static void clearCrosshair(Player player) {
+        CROSSHAIRS.remove(player.getUniqueId());
+    }
+
     private static void render(Player player) {
         long now = System.currentTimeMillis();
         State state = STATES.get(player.getUniqueId());
         Meters meters = METERS.get(player.getUniqueId());
         Mask mask = MASKS.get(player.getUniqueId());
         Reticle reticle = RETICLES.get(player.getUniqueId());
+        Crosshair crosshair = CROSSHAIRS.get(player.getUniqueId());
         boolean metersLive = meters != null && meters.until() >= now;
         boolean maskLive = mask != null && mask.until() >= now;
         boolean reticleLive = reticle != null && reticle.until() >= now;
+        boolean crosshairLive = crosshair != null && crosshair.until() >= now;
 
         // --- build the centered "base" (top/transient text + persistent bar) ---
         Component base = null;
@@ -223,7 +251,7 @@ public final class ActionBars {
             }
         }
 
-        if (!metersLive && !maskLive && !reticleLive) {
+        if (!metersLive && !maskLive && !reticleLive && !crosshairLive) {
             if (base != null) player.sendActionBar(base);
             return;
         }
@@ -237,8 +265,10 @@ public final class ActionBars {
         if (base != null) T = baseWidth;
         else if (maskLive) T = mask.width();
         else if (metersLive) T = 2 * meters.leftShift();
-        else T = reticle.width();
+        else if (reticleLive) T = reticle.width();
+        else T = crosshair.width();
         if (T <= 0) T = maskLive ? mask.width() : reticleLive ? reticle.width()
+            : crosshairLive ? crosshair.width()
             : (meters != null ? 2 * meters.leftShift() : 1);
         Component out = base != null ? base : advance(T);   // an invisible T-wide spacer sets the centering
 
@@ -256,6 +286,11 @@ public final class ActionBars {
         if (reticleLive) {
             int w = reticle.width();
             out = out.append(advance(-w / 2 - T / 2)).append(reticle.glyph())
+                     .append(advance(T / 2 - w / 2));
+        }
+        if (crosshairLive) {
+            int w = crosshair.width();
+            out = out.append(advance(-w / 2 - T / 2)).append(crosshair.glyph())
                      .append(advance(T / 2 - w / 2));
         }
         player.sendActionBar(out);

@@ -230,20 +230,10 @@ public final class DownedListener implements Listener, Runnable {
             boolean using = p.isHandRaised() && isMedkit(p.getActiveItem());
             java.util.UUID id = p.getUniqueId();
             if (!using) {
-                // Grace window: keep the flag up for a few ticks after the hold ends so a
-                // one-tick flicker in isHandRaised() can't make the credits HUD flash back
-                // and forth with the meter. Only once the grace runs out does the HUD return.
-                int g = medkitGrace.getOrDefault(id, 0);
-                if (g > 0) {
-                    medkitGrace.put(id, g - 1);
-                    if (obj != null) obj.getScore(p.getName()).setScore(1);
-                } else {
-                    medkitGrace.remove(id);
-                    if (obj != null) obj.getScoreboard().resetScores(p.getName());
-                }
+                MEDKIT_METER.remove(id);
+                if (obj != null) obj.getScoreboard().resetScores(p.getName());
                 continue;
             }
-            medkitGrace.put(id, 4);
             if (obj != null) obj.getScore(p.getName()).setScore(1);
             float progress = Math.max(0f, Math.min(1f, p.getHandRaisedTime() / 60f));   // 3s = 60t
             Entity tgt = p.getTargetEntity(4);
@@ -254,22 +244,25 @@ public final class DownedListener implements Listener, Runnable {
                 .text("▰".repeat(Math.max(0, seg)), NamedTextColor.GREEN)
                 .append(net.kyori.adventure.text.Component.text("▱".repeat(Math.max(0, 10 - seg)),
                     NamedTextColor.DARK_GRAY));
-            // One compact line on the SUBTITLE only (no giant 4x title) - much smaller, and
-            // it never trades places with the currency HUD because that yields on lab.medkit.
+            // Publish one compact meter line; FireManager composes it into the SAME title
+            // send as the credits, so it can never trade places with the currency HUD.
             net.kyori.adventure.text.Component meter = net.kyori.adventure.text.Component
                 .text("Treating ", NamedTextColor.WHITE)
                 .append(net.kyori.adventure.text.Component.text(who,
                     onOther ? NamedTextColor.AQUA : NamedTextColor.GREEN))
                 .append(net.kyori.adventure.text.Component.text("  ", NamedTextColor.WHITE))
                 .append(bar);
-            p.showTitle(net.kyori.adventure.title.Title.title(
-                net.kyori.adventure.text.Component.empty(), meter,
-                net.kyori.adventure.title.Title.Times.times(java.time.Duration.ZERO,
-                    java.time.Duration.ofMillis(400), java.time.Duration.ZERO)));
+            MEDKIT_METER.put(id, meter);
         }
     }
 
-    private final java.util.Map<java.util.UUID, Integer> medkitGrace = new java.util.HashMap<>();
+    /** The current medkit meter line for a player (subtitle content), or null when they
+     *  aren't treating. FireManager reads this and composes it with the credits HUD. */
+    private static final java.util.Map<java.util.UUID, net.kyori.adventure.text.Component>
+        MEDKIT_METER = new java.util.concurrent.ConcurrentHashMap<>();
+    public static net.kyori.adventure.text.Component medkitMeter(java.util.UUID id) {
+        return MEDKIT_METER.get(id);
+    }
 
     /** Block STARTING a medkit when the holder is already at 9+ hearts (18 HP) and has
      *  nobody downed to treat - so you can't burn a kit topping off scratches. Reviving a

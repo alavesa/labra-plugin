@@ -29,8 +29,8 @@ public final class SprintManager implements Runnable, Listener {
     private static final double RECOVER_AT = 40.0;      // must reach this to sprint again
     private static final int TICK_PERIOD = 2;           // scheduled every 2 ticks
 
-    /** How long the "you ran the bar dry" penalty lasts: Slowness I + no running. */
-    private static final int WINDED_TICKS = 60;   // 3 seconds
+    /** How long the "you ran the bar dry" penalty lasts: Slowness II + no running. */
+    private static final int WINDED_TICKS = 40;   // 2 seconds
 
     private final LabRegistry registry;
     private final Map<UUID, Double> stamina = new HashMap<>();
@@ -86,11 +86,12 @@ public final class SprintManager implements Runnable, Listener {
                 if (s <= 0) {
                     s = 0;
                     wind = true;
-                    windedTicks.put(id, WINDED_TICKS);        // 3s locked out of running
+                    windedTicks.put(id, WINDED_TICKS);        // 2s locked out of running
                     player.setSprinting(false);
-                    // Slowness I for 3 seconds sells the exhaustion
+                    // Slowness II for 2 seconds sells the exhaustion; running stays locked
+                    // (winded) until the bar climbs back over RECOVER_AT below.
                     player.addPotionEffect(new PotionEffect(
-                        PotionEffectType.SLOWNESS, WINDED_TICKS, 0, true, false, false));
+                        PotionEffectType.SLOWNESS, WINDED_TICKS, 1, true, false, false));
                 }
             } else {
                 s = Math.min(MAX, s + REGEN);

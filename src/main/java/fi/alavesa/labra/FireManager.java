@@ -145,20 +145,7 @@ public final class FireManager implements Listener, Runnable {
      *  instead of the vanilla pumpkin blur (now cleared). Scheduled every few ticks. */
     public void maskTick() {
         for (Player p : plugin.getServer().getOnlinePlayers()) {
-            // While the player is mid-blink, the blink darkness OWNS the title. If we
-            // sent the mask/NVG glyph now it would overwrite that darkness and cut the
-            // blink short - so yield until the blink is over (blink lasts the same
-            // whether or not headgear is worn).
-            if (isBlinking(p)) continue;
-            if (usingMedkit(p)) continue;   // the medkit meter owns the title while treating
-            if (inMenu(p)) continue;   // the facility menu owns the title layer; don't fight it
-            String tier = registry.gasMaskTier(p.getInventory().getHelmet());
-            if (tier == null) { nvgOverlay(p); continue; }
-            char ch = switch (tier) { case "super" -> ''; case "heavy" -> ''; default -> ''; };
-            Component glyph = Component.text(String.valueOf(ch))
-                .font(net.kyori.adventure.key.Key.key("lab", "gasmask"))
-                .color(NamedTextColor.WHITE);
-            showTitleGlyph(p, glyph);
+            renderTitleHud(p);
         }
     }
 
@@ -170,14 +157,9 @@ public final class FireManager implements Listener, Runnable {
         return flagSet(p, "lab.blinking");
     }
 
-    /** True while DownedListener reports this player is mid-medkit (lab.medkit == 1). */
-    private boolean usingMedkit(Player p) {
-        return flagSet(p, "lab.medkit");
-    }
-
     /** True while Facility reports the player has the main menu GUI open (facility.menu
-     *  == 1). The menu paints its own background on the title layer, so the credits
-     *  title must yield or it overwrites the menu overlay. */
+     *  == 1). The menu paints its own background on the title layer, so the whole HUD
+     *  must yield or it overwrites the menu overlay. */
     private boolean inMenu(Player p) {
         return flagSet(p, "facility.menu");
     }
@@ -195,46 +177,72 @@ public final class FireManager implements Listener, Runnable {
      *  values. Bump both (keep SUB ~2x TITLE) to move it further toward the corner. */
     private static final int TITLE_PUSH = 34;   // *4 on screen
     private static final int SUB_PUSH = 68;     // *2 on screen -> same screen offset
+    /** Render advance of a headgear overlay glyph (mask/NVG PNGs are 256x256 at height
+     *  256 -> a font-pixel advance of 256). Half of it recentres the glyph net-zero. */
+    private static final int GLYPH_ADVANCE = 256;
 
     /**
-     * The unified title HUD: the full-screen headgear glyph (mask/NVG, if worn) sits
-     * centred on the TITLE line, while the CREDITS readout rides the same title line
-     * pushed to the TOP-RIGHT (net-zero, so it never shifts the mask), and the STASH
-     * total rides the SUBTITLE line just under it. A title renders at ~4x scale so the
-     * headgear glyph fills the screen; the credits use the lab:hud spacer font to
-     * right-align. All in one title send, so credits + mask coexist instead of
-     * fighting for the title line. glyph = Component.empty() when no headgear is worn.
+     * THE one title HUD send. Everything wanting the title/subtitle layer is composed
+     * here into a SINGLE showTitle, so nothing can alternate with or shift anything else:
+     *
+     *   TITLE    = credits readout (top-right, fixed) + headgear glyph (mask/NVG, drawn
+     *              NET-ZERO so it centres full-screen without moving the credits)
+     *   SUBTITLE = stash readout (top-right, fixed) + the medkit meter (centred, net-zero)
+     *              while a medkit is being used
+     *
+     * Yields entirely while blinking (ScpMobs owns the darkness) or in the menu (Facility
+     * owns the background). credits = WALLET cash carried; stash = the stash total.
      */
-    private void showTitleGlyph(Player p, Component glyph) {
+    private void renderTitleHud(Player p) {
+        if (isBlinking(p)) return;
+        if (inMenu(p)) return;
         overlayShown.add(p.getUniqueId());
-        // kept short so the ~4x title text stays on-screen in the corner
+
+        Component glyph = headgearGlyph(p);
         Component credits = Component.text("❈ ", NamedTextColor.YELLOW)
-            .append(Component.text(String.valueOf(Credits.balance(p)), NamedTextColor.GOLD));
+            .append(Component.text(String.valueOf(Credits.wallet(p)), NamedTextColor.GOLD));
         Component stashLine = Component.text("⌂ ", NamedTextColor.AQUA)
             .append(Component.text(String.valueOf(Credits.stash(p)), NamedTextColor.AQUA));
         int cw = ActionBars.width(credits);
         int sw = ActionBars.width(stashLine);
-        // push right, draw, then rewind the full width -> the readout contributes 0 to
-        // the title's centring, so the headgear glyph stays centred
+
         Component titleLine = ActionBars.spacer(TITLE_PUSH).append(credits)
-            .append(ActionBars.spacer(-(TITLE_PUSH + cw))).append(glyph);
+            .append(ActionBars.spacer(-(TITLE_PUSH + cw)));
+        if (glyph != null) {
+            titleLine = titleLine.append(ActionBars.spacer(-GLYPH_ADVANCE / 2)).append(glyph)
+                .append(ActionBars.spacer(-GLYPH_ADVANCE / 2));
+        }
+
         Component subLine = ActionBars.spacer(SUB_PUSH).append(stashLine)
             .append(ActionBars.spacer(-(SUB_PUSH + sw)));
+        Component meter = DownedListener.medkitMeter(p.getUniqueId());
+        if (meter != null) {
+            int mw = ActionBars.width(meter);
+            subLine = subLine.append(ActionBars.spacer(-mw / 2)).append(meter)
+                .append(ActionBars.spacer(-mw / 2));
+        }
+
         p.showTitle(net.kyori.adventure.title.Title.title(titleLine, subLine,
             net.kyori.adventure.title.Title.Times.times(
                 java.time.Duration.ZERO, java.time.Duration.ofMillis(1500), java.time.Duration.ZERO)));
     }
 
-    /** The worn NVG's per-type overlay (green/red/blue), or clear our overlay title. */
-    private void nvgOverlay(Player p) {
-        String nvg = registry.nvgType(p.getInventory().getHelmet());
-        if (nvg == null) {
-            showTitleGlyph(p, Component.empty());   // no headgear: still show the credits HUD
-            return;
+    /** The full-screen overlay glyph for the worn headgear: a gas-mask tier, or an NVG
+     *  tint, or null when the head slot has neither. */
+    private Component headgearGlyph(Player p) {
+        String tier = registry.gasMaskTier(p.getInventory().getHelmet());
+        if (tier != null) {
+            char ch = switch (tier) { case "super" -> ''; case "heavy" -> ''; default -> ''; };
+            return Component.text(String.valueOf(ch))
+                .font(net.kyori.adventure.key.Key.key("lab", "gasmask")).color(NamedTextColor.WHITE);
         }
-        char ch = switch (nvg) { case "red" -> ''; case "blue" -> ''; default -> ''; };
-        showTitleGlyph(p, Component.text(String.valueOf(ch))
-            .font(net.kyori.adventure.key.Key.key("lab", "nvg")).color(NamedTextColor.WHITE));
+        String nvg = registry.nvgType(p.getInventory().getHelmet());
+        if (nvg != null) {
+            char ch = switch (nvg) { case "red" -> ''; case "blue" -> ''; default -> ''; };
+            return Component.text(String.valueOf(ch))
+                .font(net.kyori.adventure.key.Key.key("lab", "nvg")).color(NamedTextColor.WHITE);
+        }
+        return null;
     }
 
     /** How many of the 26 surrounding blocks are also fire. */
