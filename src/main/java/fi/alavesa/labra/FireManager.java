@@ -175,8 +175,8 @@ public final class FireManager implements Listener, Runnable {
     /** Right-push offsets in FONT pixels. A title renders at ~4x and a subtitle at ~2x,
      *  so the same on-screen offset needs a DIFFERENT font-px push per line - hence two
      *  values. Bump both (keep SUB ~2x TITLE) to move it further toward the corner. */
-    private static final int TITLE_PUSH = 34;   // *4 on screen
-    private static final int SUB_PUSH = 68;     // *2 on screen -> same screen offset
+    private static final int TITLE_PUSH = 62;   // *4 on screen - far toward the top-right corner
+    private static final int SUB_PUSH = 124;    // *2 on screen -> same screen offset as the title
     /** Render advance of a headgear overlay glyph (mask/NVG PNGs are 256x256 at height
      *  256 -> a font-pixel advance of 256). Half of it recentres the glyph net-zero. */
     private static final int GLYPH_ADVANCE = 256;
@@ -199,10 +199,8 @@ public final class FireManager implements Listener, Runnable {
         overlayShown.add(p.getUniqueId());
 
         Component glyph = headgearGlyph(p);
-        Component credits = Component.text("❈ ", NamedTextColor.YELLOW)
-            .append(Component.text(String.valueOf(Credits.wallet(p)), NamedTextColor.GOLD));
-        Component stashLine = Component.text("⌂ ", NamedTextColor.AQUA)
-            .append(Component.text(String.valueOf(Credits.stash(p)), NamedTextColor.AQUA));
+        Component credits = Component.text("$" + Credits.wallet(p), NamedTextColor.GOLD);
+        Component stashLine = Component.text("Stash $" + Credits.stash(p), NamedTextColor.AQUA);
         int cw = ActionBars.width(credits);
         int sw = ActionBars.width(stashLine);
 
@@ -686,31 +684,39 @@ public final class FireManager implements Listener, Runnable {
         }
     }
 
-    /** Scheduled: active sprinklers rain down, clearing fire and dousing anyone burning. */
+    /** Scheduled: sprinklers are just hanging_roots on the ceiling - no buttons, no
+     *  linking. Any hanging_roots automatically senses fire in the column beneath it and
+     *  rains it out. We scan for fire near players (fire is the rare trigger), then look
+     *  straight up for a hanging_roots head; if one is there, the fire is doused. */
     public void sprinklerTick() {
-        if (sprinklers.isEmpty()) return;
-        long now = System.currentTimeMillis();
-        var it = sprinklers.entrySet().iterator();
-        while (it.hasNext()) {
-            var e = it.next();
-            if (now > e.getValue()) { it.remove(); continue; }
-            String[] p = e.getKey().split(":");
-            var w = Bukkit.getWorld(p[0]);
-            if (w == null) { it.remove(); continue; }
-            Block b = w.getBlockAt(Integer.parseInt(p[1]), Integer.parseInt(p[2]), Integer.parseInt(p[3]));
-            if (b.getType() != Material.HANGING_ROOTS) { it.remove(); continue; }
-            Location spout = b.getLocation().add(0.5, 0, 0.5);
-            w.spawnParticle(Particle.FALLING_WATER, spout.clone().subtract(0, 0.2, 0), 14, 1.2, 0.1, 1.2, 0);
-            w.spawnParticle(Particle.SPLASH, spout.clone().subtract(0, 2.0, 0), 8, 1.4, 0.2, 1.4, 0);
-            // A wide cone below the sprinkler head so it doesn't miss spots: 7x7 across,
-            // all the way to the floor.
-            int rad = 3;
-            for (int dy = 0; dy <= 12; dy++) for (int dx = -rad; dx <= rad; dx++) for (int dz = -rad; dz <= rad; dz++) {
-                Block below = b.getRelative(dx, -dy, dz);
-                if (below.getType() == Material.FIRE) { below.setType(Material.AIR); fires.remove(key(below)); }
-            }
-            for (var ent : w.getNearbyEntities(spout.clone().subtract(0, 5, 0), 4.0, 6, 4.0)) {
-                if (ent instanceof LivingEntity le && le.getFireTicks() > 0) le.setFireTicks(0);
+        final int R = 10;            // horizontal search radius around each player
+        final int UP = 14;           // how far a sprinkler head reaches up to a fire
+        java.util.Set<String> done = new java.util.HashSet<>();
+        for (Player pl : plugin.getServer().getOnlinePlayers()) {
+            if (pl.getGameMode() == GameMode.SPECTATOR) continue;
+            Block origin = pl.getLocation().getBlock();
+            var w = origin.getWorld();
+            for (int dx = -R; dx <= R; dx++) for (int dy = -5; dy <= 4; dy++) for (int dz = -R; dz <= R; dz++) {
+                Block f = origin.getRelative(dx, dy, dz);
+                if (f.getType() != Material.FIRE) continue;
+                if (!done.add(key(f))) continue;
+                // look up for a hanging_roots sprinkler head; a solid ceiling blocks it
+                Block head = null;
+                for (int up = 1; up <= UP; up++) {
+                    Block a = f.getRelative(0, up, 0);
+                    if (a.getType() == Material.HANGING_ROOTS) { head = a; break; }
+                    if (a.getType().isOccluding()) break;
+                }
+                if (head == null) continue;
+                f.setType(Material.AIR);
+                fires.remove(key(f));
+                Location spout = head.getLocation().add(0.5, -0.2, 0.5);
+                w.spawnParticle(Particle.FALLING_WATER, spout, 6, 0.35, 0.1, 0.35, 0);
+                w.spawnParticle(Particle.SPLASH, f.getLocation().add(0.5, 0.1, 0.5), 6, 0.3, 0.1, 0.3, 0);
+                // douse anyone burning right under the head
+                for (var ent : w.getNearbyEntities(spout.clone().subtract(0, 3, 0), 2.5, 4, 2.5)) {
+                    if (ent instanceof LivingEntity le && le.getFireTicks() > 0) le.setFireTicks(0);
+                }
             }
         }
     }
@@ -790,11 +796,7 @@ public final class FireManager implements Listener, Runnable {
         if (!(event.getRightClicked() instanceof Interaction interaction)) return;
         var tags = interaction.getScoreboardTags();
         Player player = event.getPlayer();
-        if (tags.contains(TAG_SPRINK_BTN)) {
-            event.setCancelled(true);
-            pressSprinklerButton(interaction, player);
-            return;
-        }
+        // Sprinkler buttons are gone: sprinklers (hanging_roots) now sense fire themselves.
         if (!tags.contains(TAG_MOUNT)) return;
         event.setCancelled(true);
         var pdc = interaction.getPersistentDataContainer();

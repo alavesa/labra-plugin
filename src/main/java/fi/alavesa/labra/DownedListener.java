@@ -240,10 +240,13 @@ public final class DownedListener implements Listener, Runnable {
             boolean onOther = tgt instanceof Player tp && tp != p && isDowned(tp);
             String who = onOther ? ((Player) tgt).getName() : "yourself";
             int seg = Math.round(progress * 10);
+            // A plain ASCII bar so it renders as a bar on every client (the block glyphs
+            // showed up as tofu boxes) - "[==== ]" filling over the 3-second hold.
             net.kyori.adventure.text.Component bar = net.kyori.adventure.text.Component
-                .text("▰".repeat(Math.max(0, seg)), NamedTextColor.GREEN)
-                .append(net.kyori.adventure.text.Component.text("▱".repeat(Math.max(0, 10 - seg)),
-                    NamedTextColor.DARK_GRAY));
+                .text("[", NamedTextColor.GRAY)
+                .append(net.kyori.adventure.text.Component.text("=".repeat(Math.max(0, seg)), NamedTextColor.GREEN))
+                .append(net.kyori.adventure.text.Component.text(" ".repeat(Math.max(0, 10 - seg)), NamedTextColor.DARK_GRAY))
+                .append(net.kyori.adventure.text.Component.text("]", NamedTextColor.GRAY));
             // Publish one compact meter line; FireManager composes it into the SAME title
             // send as the credits, so it can never trade places with the currency HUD.
             net.kyori.adventure.text.Component meter = net.kyori.adventure.text.Component

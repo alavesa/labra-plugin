@@ -283,36 +283,10 @@ public final class LabraPlugin extends JavaPlugin {
                     return error(sender, "/lab extinguisher mount|remove");
                 }
                 case "sprinkler" -> {
-                    if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
-                    if (!(sender instanceof Player player)) return error(sender, "Players only.");
-                    String sub = args.length >= 2 ? args[1].toLowerCase() : "";
-                    switch (sub) {
-                        case "button" -> {
-                            return fire.placeSprinklerButton(player)
-                                ? ok(sender, "Sprinkler button placed - it's now your active button. Aim at each "
-                                    + "hanging_roots sprinkler and run /lab sprinkler link.")
-                                : error(sender, "Look at a wall within 5 blocks to place the button.");
-                        }
-                        case "select" -> {
-                            return fire.selectSprinklerButton(player)
-                                ? ok(sender, "Button selected - /lab sprinkler link the sprinklers you want it to run.")
-                                : error(sender, "Look at a sprinkler button to select it.");
-                        }
-                        case "link" -> {
-                            String r = fire.linkSprinkler(player);
-                            // linkSprinkler returns the new count on success, or an error string
-                            if (r != null && r.chars().allMatch(Character::isDigit)) {
-                                return ok(sender, "Linked (" + r + " sprinkler" + (r.equals("1") ? "" : "s")
-                                    + " on this button). Right-click the button to test.");
-                            }
-                            return error(sender, r == null ? "Could not link." : r);
-                        }
-                        case "remove" -> {
-                            return fire.removeSprinklerButton(player) ? ok(sender, "Sprinkler button removed.")
-                                : error(sender, "Look at a sprinkler button to remove it.");
-                        }
-                        default -> { return error(sender, "/lab sprinkler button|select|link|remove"); }
-                    }
+                    // Buttons are gone: any hanging_roots is now an automatic sprinkler that
+                    // senses fire beneath it and douses it. Just place hanging_roots blocks.
+                    return ok(sender, "Sprinklers are automatic now - place a hanging_roots block on the "
+                        + "ceiling and it douses any fire beneath it. No buttons or linking needed.");
                 }
                 case "place" -> {
                     if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");

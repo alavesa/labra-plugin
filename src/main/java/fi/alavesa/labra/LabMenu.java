@@ -127,8 +127,8 @@ public final class LabMenu implements Listener {
         // --- fire-safety fixtures (aim at a wall, then click)
         list.add(new Entry(Material.ITEM_FRAME, "Place: Extinguisher wall mount", NamedTextColor.YELLOW,
             "lab extinguisher mount", null));
-        list.add(new Entry(Material.LEVER, "Place: Sprinkler button", NamedTextColor.YELLOW,
-            "lab sprinkler button", null));
+        list.add(new Entry(Material.HANGING_ROOTS, "Sprinkler (hanging_roots - auto-douses fire below)",
+            NamedTextColor.YELLOW, "minecraft:give @s hanging_roots", null));
         // --- facility fixtures & personal gear
         list.add(new Entry(Material.SPAWNER, "Place: Personal stash", NamedTextColor.YELLOW,
             "stash place", null));
