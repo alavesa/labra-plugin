@@ -173,8 +173,16 @@ public final class LabRegistry {
         // mask from a plain one by looking at it.
         meta.itemName(Component.text("Gas Mask", NamedTextColor.GREEN).decoration(TextDecoration.ITALIC, false));
         CustomModelDataComponent cmd = meta.getCustomModelDataComponent();
-        cmd.setStrings(List.of("lab_gasmask"));   // identical model for every tier
+        cmd.setStrings(List.of("lab_gasmask"));   // identical HELD model for every tier
         meta.setCustomModelDataComponent(cmd);
+        // WORN model: a custom gas-mask equipment asset (lab:gasmask) instead of the plain
+        // dyed leather helmet, so it looks like a mask on the head.
+        try {
+            var eq = meta.getEquippable();
+            eq.setSlot(org.bukkit.inventory.EquipmentSlot.HEAD);
+            eq.setModel(org.bukkit.NamespacedKey.fromString("lab:gasmask"));
+            meta.setEquippable(eq);
+        } catch (Throwable ignored) { /* older API: skip, held model still applies */ }
         meta.getPersistentDataContainer().set(gasMaskKey, PersistentDataType.STRING, t);
         item.setItemMeta(meta);
         return item;

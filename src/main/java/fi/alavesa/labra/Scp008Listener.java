@@ -41,6 +41,34 @@ public final class Scp008Listener implements Listener {
         return item.getItemMeta().getCustomModelDataComponent().getStrings().contains("lab_syringe_008");
     }
 
+    /** RIGHT-CLICK the syringe: inject the player you're AIMING at within reach, or yourself
+     *  if you're not aiming at anyone. A composed subtitle says which - no flicker. */
+    @EventHandler
+    public void onInject(org.bukkit.event.player.PlayerInteractEvent event) {
+        if (event.getHand() != org.bukkit.inventory.EquipmentSlot.HAND) return;
+        if (!event.getAction().isRightClick()) return;
+        ItemStack held = event.getItem();
+        if (!isSyringe(held)) return;
+        event.setCancelled(true);
+        Player user = event.getPlayer();
+        double reach = plugin.getConfig().getDouble("scp008.inject-reach", 4.0);
+        var ray = user.getWorld().rayTraceEntities(user.getEyeLocation(),
+            user.getEyeLocation().getDirection(), reach, 0.5,
+            e -> e instanceof Player && e != user);
+        Player target = (ray != null && ray.getHitEntity() instanceof Player p) ? p : user;
+        held.setAmount(held.getAmount() - 1);
+        target.getWorld().playSound(target.getLocation(), Sound.ITEM_BOTTLE_EMPTY, 0.8f, 0.7f);
+        Bukkit.dispatchCommand(Bukkit.getConsoleSender(),
+            "execute as " + target.getUniqueId() + " run function lab:scp008/infect");
+        boolean onOther = target != user;
+        Component note = Component.text("Injecting ", NamedTextColor.WHITE)
+            .append(Component.text(onOther ? target.getName() : "yourself",
+                onOther ? NamedTextColor.RED : NamedTextColor.GREEN));
+        FireManager.subMessage(user, note, 2000);   // composed subtitle - no flicker
+        if (onOther) FireManager.subMessage(target,
+            Component.text("A needle sinks in.", NamedTextColor.RED), 2000);
+    }
+
     @EventHandler
     public void onStab(EntityDamageByEntityEvent event) {
         if (!(event.getDamager() instanceof Player attacker)) return;

@@ -172,6 +172,20 @@ public final class FireManager implements Listener, Runnable {
         return score.isScoreSet() && score.getScore() >= 1;
     }
 
+    /** A transient centred subtitle message (e.g. "Injecting X"), shown for a moment and
+     *  composed into the ONE title send by renderTitleHud, so it never flickers with the
+     *  other subtitle overlays. Other listeners publish via {@link #subMessage}. */
+    private static final java.util.Map<UUID, Object[]> SUB_MSG = new java.util.concurrent.ConcurrentHashMap<>();
+    public static void subMessage(Player p, Component msg, long ms) {
+        SUB_MSG.put(p.getUniqueId(), new Object[]{msg, System.currentTimeMillis() + ms});
+    }
+    private Component subMessageFor(UUID id) {
+        Object[] v = SUB_MSG.get(id);
+        if (v == null) return null;
+        if ((Long) v[1] < System.currentTimeMillis()) { SUB_MSG.remove(id); return null; }
+        return (Component) v[0];
+    }
+
     /** Right-push offsets in FONT pixels. A title renders at ~4x and a subtitle at ~2x,
      *  so the same on-screen offset needs a DIFFERENT font-px push per line - hence two
      *  values. Bump both (keep SUB ~2x TITLE) to move it further toward the corner. */
@@ -202,6 +216,10 @@ public final class FireManager implements Listener, Runnable {
         if (p.getGameMode() == GameMode.SPECTATOR) return;
         if (inMenu(p)) return;
         if (flagSet(p, "scp914.busy")) return;   // sealed in SCP-914: the blackout owns the title
+        // Blind = a full-screen darkness owns the screen (914 blackout applies BLINDNESS). This
+        // is a direct player property, not a raced scoreboard flag, so it never flickers - and
+        // you can't read the HUD while blind anyway.
+        if (p.hasPotionEffect(org.bukkit.potion.PotionEffectType.BLINDNESS)) return;
         overlayShown.add(p.getUniqueId());
 
         Component glyph = headgearGlyph(p);
@@ -220,14 +238,16 @@ public final class FireManager implements Listener, Runnable {
                 .append(ActionBars.spacer(-GLYPH_ADVANCE / 2));
         }
 
-        // Subtitle carries only the medkit meter, centred. Force the DEFAULT font on it -
-        // otherwise it inherits the lab:hud spacer font and renders as tofu boxes.
+        // Subtitle carries the medkit meter OR a transient message (e.g. the SCP-008 injection
+        // notice), centred, composed into THIS single title send so it never flickers with any
+        // other subtitle. Force the DEFAULT font (else it inherits the lab:hud spacer font = tofu).
         Component subLine = Component.empty();
-        Component meter = DownedListener.medkitMeter(p.getUniqueId());
-        if (meter != null) {
-            meter = meter.font(net.kyori.adventure.key.Key.key("minecraft", "default"));
-            int mw = ActionBars.width(meter);
-            subLine = ActionBars.spacer(-mw / 2).append(meter).append(ActionBars.spacer(-mw / 2));
+        Component sub = DownedListener.medkitMeter(p.getUniqueId());
+        if (sub == null) sub = subMessageFor(p.getUniqueId());
+        if (sub != null) {
+            sub = sub.font(net.kyori.adventure.key.Key.key("minecraft", "default"));
+            int mw = ActionBars.width(sub);
+            subLine = ActionBars.spacer(-mw / 2).append(sub).append(ActionBars.spacer(-mw / 2));
         }
 
         // SHORT stay (re-sent every 2 ticks, so it stays continuous): if this title ever leaks
