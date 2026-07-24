@@ -230,9 +230,12 @@ public final class FireManager implements Listener, Runnable {
             subLine = ActionBars.spacer(-mw / 2).append(meter).append(ActionBars.spacer(-mw / 2));
         }
 
+        // SHORT stay (re-sent every 2 ticks, so it stays continuous): if this title ever leaks
+        // over a blink/914 blackout for a tick (task-order race), it fades in 0.3s instead of
+        // hanging for 1.5s and flickering. The blink/914 effects also re-assert every tick now.
         p.showTitle(net.kyori.adventure.title.Title.title(titleLine, subLine,
             net.kyori.adventure.title.Title.Times.times(
-                java.time.Duration.ZERO, java.time.Duration.ofMillis(1500), java.time.Duration.ZERO)));
+                java.time.Duration.ZERO, java.time.Duration.ofMillis(300), java.time.Duration.ZERO)));
     }
 
     /** The full-screen overlay glyph for the worn headgear: a gas-mask tier, or an NVG
