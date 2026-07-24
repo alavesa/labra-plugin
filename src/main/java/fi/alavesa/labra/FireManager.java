@@ -201,6 +201,7 @@ public final class FireManager implements Listener, Runnable {
         // background again - the flag check below is just a belt-and-braces extra.
         if (p.getGameMode() == GameMode.SPECTATOR) return;
         if (inMenu(p)) return;
+        if (flagSet(p, "scp914.busy")) return;   // sealed in SCP-914: the blackout owns the title
         overlayShown.add(p.getUniqueId());
 
         Component glyph = headgearGlyph(p);

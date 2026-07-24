@@ -252,7 +252,7 @@ public final class ActionBars {
         }
 
         if (!metersLive && !maskLive && !reticleLive && !crosshairLive) {
-            if (base != null) player.sendActionBar(base);
+            if (base != null) player.sendActionBar(deItalic(base));
             return;
         }
 
@@ -293,7 +293,21 @@ public final class ActionBars {
             out = out.append(advance(-w / 2 - T / 2)).append(crosshair.glyph())
                      .append(advance(T / 2 - w / 2));
         }
-        player.sendActionBar(out);
+        player.sendActionBar(deItalic(out));
+    }
+
+    /** Force italic OFF on a component and ALL its descendants. Italic shears the custom
+     *  HUD glyphs (spacers, meters, symbols) and misaligns them, so every action bar sent
+     *  from this hub is rendered upright regardless of what the caller styled it with. */
+    private static Component deItalic(Component c) {
+        Component out = c.decoration(net.kyori.adventure.text.format.TextDecoration.ITALIC, false);
+        java.util.List<Component> kids = c.children();
+        if (!kids.isEmpty()) {
+            java.util.List<Component> mapped = new java.util.ArrayList<>(kids.size());
+            for (Component k : kids) mapped.add(deItalic(k));
+            out = out.children(mapped);
+        }
+        return out;
     }
 
     /** Public: a horizontal pixel offset in the lab:hud font (for other HUDs to
