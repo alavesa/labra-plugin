@@ -49,7 +49,6 @@ import java.util.UUID;
  */
 public final class FireManager implements Listener, Runnable {
 
-    private static final long FIRE_LIFETIME_MS = 30L * 60L * 1000L;   // 30 minutes
     private static final String TAG_MOUNT = "lab.extmount";
     private static final String TAG_MOUNT_CAN = "lab.extmount.can";
     private static final String TAG_SPRINK_BTN = "lab.sprinkbtn";
@@ -85,34 +84,61 @@ public final class FireManager implements Listener, Runnable {
 
     // ------------------------------------------------------- persistent fire
 
+    /** How long a tracked fire is protected from fading, in ms (config fire.lifetime-seconds). After
+     *  this it fades and is actively put out, so fires always go away instead of lingering forever. */
+    private long lifetimeMs() {
+        return Math.max(5L, plugin.getConfig().getInt("fire.lifetime-seconds", 150)) * 1000L;
+    }
+
+    /** Hard cap on simultaneously-tracked fires (config fire.max-fires). At the cap, new fire isn't
+     *  protected and can't spread - the backstop against a blaze tiling the facility and lagging it. */
+    private int maxFires() {
+        return Math.max(0, plugin.getConfig().getInt("fire.max-fires", 300));
+    }
+
     @EventHandler
     public void onIgnite(BlockIgniteEvent event) {
+        // Naturally SPREADING fire is never adopted into the persistent set - it fades on the vanilla
+        // schedule - and nothing is tracked past the cap. Only deliberately-lit fire lasts a while.
+        if (event.getCause() == BlockIgniteEvent.IgniteCause.SPREAD) return;
+        if (fires.size() >= maxFires()) return;
         fires.put(key(event.getBlock()), System.currentTimeMillis());
     }
 
-    /** Fire fades on its own after seconds - cancel that until it's 30 min old. */
+    /** Fire fades on its own after seconds - we cancel that only for fire we deliberately track, and
+     *  only until it reaches its lifetime. Untracked fire (vanilla spread) is left to die naturally. */
     @EventHandler
     public void onFade(BlockFadeEvent event) {
         if (event.getBlock().getType() != Material.FIRE) return;
-        String k = key(event.getBlock());
-        Long lit = fires.get(k);
-        long now = System.currentTimeMillis();
-        if (lit == null) { fires.put(k, now); event.setCancelled(true); return; }
-        if (now - lit < FIRE_LIFETIME_MS) event.setCancelled(true);
-        else fires.remove(k);
+        Long lit = fires.get(key(event.getBlock()));
+        if (lit == null) return;   // not ours - let it burn out on the normal schedule
+        if (System.currentTimeMillis() - lit < lifetimeMs()) event.setCancelled(true);
+        else fires.remove(key(event.getBlock()));
     }
 
-    /** Housekeeping: drop tracking for blocks that are no longer fire or have expired. */
+    /** Once fire tries to spread past the cap, stop it - so a blaze can't creep across every
+     *  flammable block forever and drag the server down. Under the cap it spreads but, being
+     *  untracked, fades naturally. */
+    @EventHandler(ignoreCancelled = true)
+    public void onSpread(org.bukkit.event.block.BlockSpreadEvent event) {
+        if (event.getNewState().getType() != Material.FIRE) return;
+        if (fires.size() >= maxFires()) event.setCancelled(true);
+    }
+
+    /** Housekeeping: forget fire that's gone, and actively PUT OUT any tracked fire that has burned
+     *  past its lifetime, so it reliably disappears instead of waiting on a random fade tick. */
     @Override
     public void run() {
         long now = System.currentTimeMillis();
+        long life = lifetimeMs();
         fires.entrySet().removeIf(e -> {
-            if (now - e.getValue() >= FIRE_LIFETIME_MS) return true;
             String[] p = e.getKey().split(":");
             var w = Bukkit.getWorld(p[0]);
             if (w == null) return true;
-            return w.getBlockAt(Integer.parseInt(p[1]), Integer.parseInt(p[2]), Integer.parseInt(p[3]))
-                .getType() != Material.FIRE;
+            Block b = w.getBlockAt(Integer.parseInt(p[1]), Integer.parseInt(p[2]), Integer.parseInt(p[3]));
+            if (b.getType() != Material.FIRE) return true;           // already out
+            if (now - e.getValue() >= life) { b.setType(Material.AIR); return true; }   // burned out - extinguish
+            return false;
         });
     }
 
@@ -356,7 +382,7 @@ public final class FireManager implements Listener, Runnable {
             if (prev.distanceSquared(cur) < 0.4) continue;   // must actually be moving away
             Block at = prev.getBlock();
             Block floor = at.getRelative(0, -1, 0);
-            if (at.getType() == Material.AIR && floor.getType().isSolid()
+            if (fires.size() < maxFires() && at.getType() == Material.AIR && floor.getType().isSolid()
                     && java.util.concurrent.ThreadLocalRandom.current().nextInt(2) == 0) {
                 at.setType(Material.FIRE);
                 fires.put(key(at), System.currentTimeMillis());
@@ -382,7 +408,7 @@ public final class FireManager implements Listener, Runnable {
      * stays possible to extinguish instead of flashing over everything at once.
      */
     public void ductSpreadTick() {
-        if (fires.isEmpty()) return;
+        if (fires.isEmpty() || fires.size() >= maxFires()) return;   // at the cap, fire stops creeping
         var rng = java.util.concurrent.ThreadLocalRandom.current();
         int checked = 0;
         for (String k : new java.util.ArrayList<>(fires.keySet())) {
