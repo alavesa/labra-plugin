@@ -78,6 +78,9 @@ public final class HudTask implements Runnable {
             org.bukkit.persistence.PersistentDataType.BYTE);
     }
 
+    /** Whether this player's Labra HUD (vitals bar, meters and the title overlays) is switched off. */
+    public boolean isHidden(Player player) { return hidden(player); }
+
     @Override
     public void run() {
         for (Player player : plugin.getServer().getOnlinePlayers()) {

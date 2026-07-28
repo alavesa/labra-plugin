@@ -389,7 +389,8 @@ public final class LabraPlugin extends JavaPlugin {
                     return true;
                 }
                 case "hud" -> {
-                    // /lab hud                      -> toggle the vitals meters for yourself
+                    // /lab hud                      -> toggle ALL your Labra HUD overlays on/off
+                    // /lab hud <player>             -> op turns another player's HUD overlays on/off
                     // /lab hud credits <x>          -> move the money HUD (px right of centre)
                     // /lab hud meters <x>           -> move the blink+sprint meters (px left of centre)
                     if (args.length >= 3 && (args[1].equalsIgnoreCase("credits") || args[1].equalsIgnoreCase("meters"))) {
@@ -404,10 +405,29 @@ public final class LabraPlugin extends JavaPlugin {
                         sender.sendMessage(Component.text(key + " = " + x + " (live).", NamedTextColor.AQUA));
                         return true;
                     }
-                    if (!(sender instanceof Player player)) return error(sender, "Players only.");
-                    hud.toggle(player);
-                    sender.sendMessage(Component.text("Vitals HUD toggled. Offsets: /lab hud credits <x> | meters <x>",
-                        NamedTextColor.AQUA));
+                    // Pick the target: another player needs lab.admin; no arg = yourself.
+                    Player target;
+                    if (args.length >= 2) {
+                        if (!sender.hasPermission("lab.admin"))
+                            return error(sender, "No permission to toggle another player's HUD.");
+                        target = getServer().getPlayerExact(args[1]);
+                        if (target == null) return error(sender, "Player not online: " + args[1]);
+                    } else {
+                        if (!(sender instanceof Player self))
+                            return error(sender, "Console must name a player: /lab hud <player>");
+                        target = self;
+                    }
+                    hud.toggle(target);
+                    boolean off = hud.isHidden(target);
+                    if (target.equals(sender)) {
+                        sender.sendMessage(Component.text("Your HUD overlays are now " + (off ? "OFF" : "ON")
+                            + ". Offsets: /lab hud credits <x> | meters <x>", NamedTextColor.AQUA));
+                    } else {
+                        sender.sendMessage(Component.text(target.getName() + "'s HUD overlays are now "
+                            + (off ? "OFF" : "ON") + ".", NamedTextColor.AQUA));
+                        target.sendMessage(Component.text("An operator turned your HUD overlays "
+                            + (off ? "OFF" : "ON") + ".", NamedTextColor.GRAY));
+                    }
                     return true;
                 }
                 case "menu" -> {
@@ -434,8 +454,10 @@ public final class LabraPlugin extends JavaPlugin {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         return switch (args.length) {
-            case 1 -> filter(Stream.of("give", "zone", "place", "extinguisher", "sprinkler", "removemachines", "admin", "scp1499", "reload"), args[0]);
+            case 1 -> filter(Stream.of("give", "zone", "place", "extinguisher", "sprinkler", "removemachines", "admin", "scp1499", "hud", "menu", "reload"), args[0]);
             case 2 -> switch (args[0].toLowerCase()) {
+                case "hud" -> filter(Stream.concat(Stream.of("credits", "meters"),
+                    getServer().getOnlinePlayers().stream().map(Player::getName)), args[1]);
                 case "give" -> filter(Stream.of("hazmat", "geiger", "sample", "extinguisher",
                     "gasmask", "supergasmask", "heavygasmask", "kit", "rod",
                     "pipette", "manual", "table", "element",

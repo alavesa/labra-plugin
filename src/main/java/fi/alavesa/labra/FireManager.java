@@ -170,6 +170,13 @@ public final class FireManager implements Listener, Runnable {
         return flagSet(p, "facility.menu");
     }
 
+    /** True when this player's Labra HUD overlays are switched off (the shared hud_off flag that
+     *  {@link HudTask} also honours for the vitals bar). Re-sent titles fade out on their own. */
+    private boolean hudHidden(Player p) {
+        return p.getPersistentDataContainer().has(plugin.keyOf("hud_off"),
+            org.bukkit.persistence.PersistentDataType.BYTE);
+    }
+
     private boolean flagSet(Player p, String objective) {
         var board = Bukkit.getScoreboardManager().getMainScoreboard();
         org.bukkit.scoreboard.Objective o = board.getObjective(objective);
@@ -214,6 +221,7 @@ public final class FireManager implements Listener, Runnable {
      * owns the background). credits = WALLET cash carried; stash = the stash total.
      */
     private void renderTitleHud(Player p) {
+        if (hudHidden(p)) return;   // HUD overlays switched off (by the player or an op) - hide everything
         if (isBlinking(p)) return;
         // Spectators are ALWAYS in a menu/CCTV/admin state where the title layer belongs to
         // something else (the lobby menu locks players into spectator). Yielding on the
