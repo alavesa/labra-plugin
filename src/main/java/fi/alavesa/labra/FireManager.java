@@ -128,6 +128,12 @@ public final class FireManager implements Listener, Runnable {
     @EventHandler
     public void onFireBreak(org.bukkit.event.block.BlockBreakEvent event) {
         if (event.getBlock().getType() != Material.FIRE) return;
+        // Creative staff can put out any flame bare-handed, even a raging one - a
+        // build/cleanup tool, not something you have to smother a block at a time.
+        if (event.getPlayer().getGameMode() == org.bukkit.GameMode.CREATIVE) {
+            fires.remove(key(event.getBlock()));
+            return;
+        }
         if (adjacentFire(event.getBlock()) == 0) {
             fires.remove(key(event.getBlock()));   // isolated single flame - let them smother it
             return;

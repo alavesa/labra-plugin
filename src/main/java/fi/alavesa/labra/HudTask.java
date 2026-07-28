@@ -7,6 +7,9 @@ import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
+import org.bukkit.Location;
+import org.bukkit.Material;
+import org.bukkit.World;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.entity.Player;
 import org.bukkit.scoreboard.Objective;
@@ -48,6 +51,10 @@ public final class HudTask implements Runnable {
     private final LabraPlugin plugin;
     private final SprintManager sprint;
     private final Map<UUID, BossBar> health = new ConcurrentHashMap<>();
+    /** Accumulated body heat (°C above the 37 baseline) from standing near fire. It
+     *  builds up while you're near a flame and lingers - cooling down slowly once you
+     *  step away - instead of the reading snapping on and off with proximity. */
+    private final Map<UUID, Double> fireHeat = new ConcurrentHashMap<>();
 
     public HudTask(LabraPlugin plugin, SprintManager sprint) {
         this.plugin = plugin;
@@ -74,6 +81,7 @@ public final class HudTask implements Runnable {
     @Override
     public void run() {
         for (Player player : plugin.getServer().getOnlinePlayers()) {
+            updateHeat(player);   // body heat accrues even with the HUD hidden
             if (hidden(player)) continue;
             updateMeters(player);
             updateHealth(player);
@@ -177,19 +185,75 @@ public final class HudTask implements Runnable {
 
     private void forget(UUID id) {
         health.remove(id);
+        fireHeat.remove(id);
+    }
+
+    // Body-heat accrual from nearby fire. HEAT_RADIUS is how far a flame's warmth
+    // reaches; WARM_PER_STEP is added each 5-tick cycle when a heat source is close
+    // (scaled by proximity), COOL_PER_STEP bled off when nothing warm is near - cooling
+    // is slower than warming so the heat lingers. HEAT_CAP is the most fire can add.
+    private static final int HEAT_RADIUS = 4;
+    private static final double WARM_PER_STEP = 0.18;
+    private static final double COOL_PER_STEP = 0.05;
+    private static final double HEAT_CAP = 6.0;
+
+    /** Warm the player toward HEAT_CAP while a flame is within HEAT_RADIUS (nearer = faster),
+     *  otherwise cool them back toward 0. Being on fire is the strongest source of all. Run
+     *  every HUD cycle so body temperature builds up and lingers instead of tracking proximity
+     *  instantly. */
+    private void updateHeat(Player player) {
+        UUID id = player.getUniqueId();
+        if (player.getGameMode() == GameMode.SPECTATOR) { fireHeat.remove(id); return; }
+
+        double proximity = nearestHeat(player);   // 0 = nothing near, 1 = right on it
+        if (player.getFireTicks() > 0) proximity = 1.0;   // literally alight - max heat
+
+        double heat = fireHeat.getOrDefault(id, 0.0);
+        if (proximity > 0) heat = Math.min(HEAT_CAP, heat + WARM_PER_STEP * proximity);
+        else heat = Math.max(0.0, heat - COOL_PER_STEP);
+
+        if (heat <= 0.0) fireHeat.remove(id);
+        else fireHeat.put(id, heat);
+    }
+
+    /** Scan a small cube around the player for heat sources and return a 0..1 warmth by the
+     *  nearest one (fire, lava, magma, campfires). 0 when nothing warm is in range. */
+    private double nearestHeat(Player player) {
+        Location eye = player.getLocation();
+        World world = eye.getWorld();
+        if (world == null) return 0.0;
+        int bx = eye.getBlockX(), by = eye.getBlockY(), bz = eye.getBlockZ();
+        double best = 0.0;
+        for (int x = -HEAT_RADIUS; x <= HEAT_RADIUS; x++) {
+            for (int y = -HEAT_RADIUS; y <= HEAT_RADIUS; y++) {
+                for (int z = -HEAT_RADIUS; z <= HEAT_RADIUS; z++) {
+                    if (!isHeatSource(world.getBlockAt(bx + x, by + y, bz + z).getType())) continue;
+                    double dist = Math.sqrt(x * x + y * y + z * z);
+                    double warmth = Math.max(0.0, 1.0 - dist / (HEAT_RADIUS + 1.0));
+                    if (warmth > best) best = warmth;
+                }
+            }
+        }
+        return best;
+    }
+
+    private boolean isHeatSource(Material m) {
+        return switch (m) {
+            case FIRE, SOUL_FIRE, LAVA, MAGMA_BLOCK, CAMPFIRE, SOUL_CAMPFIRE -> true;
+            default -> false;
+        };
     }
 
     /**
      * 37.0 at rest. SCP-008 cooks its host toward 41 over the infection's three
-     * minutes; SCP-009 pulls toward 30 as the ice takes over.
+     * minutes; SCP-009 pulls toward 30 as the ice takes over. Standing near fire
+     * adds accumulated body heat (see {@link #updateHeat}) that lingers as you leave.
      */
     private double bodyTemp(Player player) {
         double temp = 37.0;
         temp += Math.min(4.0, score(player, "lab.z008") / 45.0);
         temp -= Math.min(7.0, score(player, "lab.inf") / 9.0);
-        if (player.getFireTicks() > 0) {
-            temp += Math.min(8.0, player.getFireTicks() / 20.0);
-        }
+        temp += fireHeat.getOrDefault(player.getUniqueId(), 0.0);
         temp += 0.1 * Math.sin(player.getTicksLived() / 90.0);
         return temp;
     }
