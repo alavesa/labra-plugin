@@ -436,6 +436,23 @@ public final class LabraPlugin extends JavaPlugin {
                     labMenu.open(player, 0);
                     return true;
                 }
+                case "fire" -> {
+                    // /lab fire clear [radius]  -> put out every fire block around you (emergency cleanup)
+                    if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
+                    if (!(sender instanceof Player player)) return error(sender, "Players only.");
+                    if (args.length < 2 || !args[1].equalsIgnoreCase("clear"))
+                        return error(sender, "/lab fire clear [radius]");
+                    int radius = 60;
+                    if (args.length >= 3) {
+                        try { radius = Integer.parseInt(args[2]); }
+                        catch (NumberFormatException e) { return error(sender, "Radius must be a number."); }
+                    }
+                    radius = Math.max(1, Math.min(100, radius));
+                    int n = fire.extinguish(player.getWorld(), player.getLocation(), radius);
+                    sender.sendMessage(Component.text("Extinguished " + n + " fire block(s) within "
+                        + radius + " blocks.", NamedTextColor.AQUA));
+                    return true;
+                }
                 case "reload" -> {
                     if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
                     registry.load();
@@ -454,10 +471,11 @@ public final class LabraPlugin extends JavaPlugin {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         return switch (args.length) {
-            case 1 -> filter(Stream.of("give", "zone", "place", "extinguisher", "sprinkler", "removemachines", "admin", "scp1499", "hud", "menu", "reload"), args[0]);
+            case 1 -> filter(Stream.of("give", "zone", "place", "extinguisher", "sprinkler", "removemachines", "admin", "scp1499", "hud", "menu", "fire", "reload"), args[0]);
             case 2 -> switch (args[0].toLowerCase()) {
                 case "hud" -> filter(Stream.concat(Stream.of("credits", "meters"),
                     getServer().getOnlinePlayers().stream().map(Player::getName)), args[1]);
+                case "fire" -> filter(Stream.of("clear"), args[1]);
                 case "give" -> filter(Stream.of("hazmat", "geiger", "sample", "extinguisher",
                     "gasmask", "supergasmask", "heavygasmask", "kit", "rod",
                     "pipette", "manual", "table", "element",

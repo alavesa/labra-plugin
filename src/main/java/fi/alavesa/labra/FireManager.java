@@ -116,13 +116,39 @@ public final class FireManager implements Listener, Runnable {
         else fires.remove(key(event.getBlock()));
     }
 
-    /** Once fire tries to spread past the cap, stop it - so a blaze can't creep across every
-     *  flammable block forever and drag the server down. Under the cap it spreads but, being
-     *  untracked, fades naturally. */
+    /** Vanilla fire spread is what tiled fire across the whole facility (blocks never burn away here,
+     *  so a flame beside anything flammable spreads forever). It's OFF by default - fire now only
+     *  exists where it's deliberately lit or where the plugin's own rare, capped duct/trail creep
+     *  puts it. Turn it back on with fire.vanilla-spread, still bounded by fire.max-fires. */
     @EventHandler(ignoreCancelled = true)
     public void onSpread(org.bukkit.event.block.BlockSpreadEvent event) {
         if (event.getNewState().getType() != Material.FIRE) return;
-        if (fires.size() >= maxFires()) event.setCancelled(true);
+        if (!plugin.getConfig().getBoolean("fire.vanilla-spread", false)) { event.setCancelled(true); return; }
+        if (fires.size() >= maxFires()) { event.setCancelled(true); return; }
+        fires.put(key(event.getBlock()), System.currentTimeMillis());   // track it so it expires
+    }
+
+    /** Emergency cleanup: put out every fire block in a cube of {@code radius} around {@code center}
+     *  (and forget it), for when fire has already spread far. Returns how many were extinguished. */
+    public int extinguish(World world, Location center, int radius) {
+        int n = 0;
+        int cx = center.getBlockX(), cy = center.getBlockY(), cz = center.getBlockZ();
+        int minY = Math.max(world.getMinHeight(), cy - radius);
+        int maxY = Math.min(world.getMaxHeight() - 1, cy + radius);
+        for (int x = cx - radius; x <= cx + radius; x++) {
+            for (int z = cz - radius; z <= cz + radius; z++) {
+                for (int y = minY; y <= maxY; y++) {
+                    Block b = world.getBlockAt(x, y, z);
+                    Material t = b.getType();
+                    if (t == Material.FIRE || t == Material.SOUL_FIRE) {
+                        b.setType(Material.AIR);
+                        fires.remove(key(b));
+                        n++;
+                    }
+                }
+            }
+        }
+        return n;
     }
 
     /** Housekeeping: forget fire that's gone, and actively PUT OUT any tracked fire that has burned
