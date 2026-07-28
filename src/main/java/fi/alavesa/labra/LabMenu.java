@@ -154,6 +154,16 @@ public final class LabMenu implements Listener {
             list.add(new Entry(Material.IRON_HORSE_ARMOR, "Mag: " + id, NamedTextColor.DARK_RED,
                 "guns give " + id, null));
         }
+        // --- ballistic armour variants + their broken shells (Guns config.yml armor: section)
+        for (String id : configKeys("Guns", "config.yml", "armor")) {
+            list.add(new Entry(Material.IRON_CHESTPLATE, "Armour: " + id, NamedTextColor.GOLD,
+                "guns armor give " + id, null));
+            list.add(new Entry(Material.NETHERITE_SCRAP, "Broken armour: " + id, NamedTextColor.DARK_GRAY,
+                "guns armor givebroken " + id, null));
+        }
+        // --- the E&T maintenance wrench (repairs vending machines)
+        list.add(new Entry(Material.BRUSH, "E&T Wrench", NamedTextColor.AQUA,
+            "terminal wrench", null));
         return list;
     }
 
