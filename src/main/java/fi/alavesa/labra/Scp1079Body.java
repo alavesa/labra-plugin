@@ -235,6 +235,29 @@ public final class Scp1079Body implements Listener, Runnable {
         }
     }
 
+    /** Mop up: remove every SCP-1079 floor mess within {@code radius} of a point (tracked messes
+     *  and any stray tagged displays alike), and return how many mess-blobs were cleared. */
+    public int cleanNear(Location center, double radius) {
+        int cleared = 0;
+        double r2 = radius * radius;
+        synchronized (messes) {
+            for (Iterator<Mess> it = messes.iterator(); it.hasNext(); ) {
+                Mess m = it.next();
+                if (!m.world.equals(center.getWorld().getUID())) continue;
+                double dx = m.x - center.getX(), dz = m.z - center.getZ();
+                if (dx * dx + dz * dz <= r2) {
+                    m.parts.forEach(d -> { if (d != null && !d.isDead()) d.remove(); });
+                    it.remove();
+                    cleared++;
+                }
+            }
+        }
+        // sweep any orphaned mess displays in range too (e.g. left by a crash)
+        for (Entity e : center.getWorld().getNearbyEntities(center, radius, radius + 2, radius))
+            if (e.getScoreboardTags().contains(MESS_TAG) && !e.isDead()) { e.remove(); cleared++; }
+        return cleared;
+    }
+
     // ------------------------------------------------------------------ upkeep tick (every ~half second)
 
     /** Slow anyone in a mess, drip pink blood off the afflicted, and bleed out the worst cases. */

@@ -139,6 +139,10 @@ public final class HudTask implements Runnable {
     private void updateHealth(Player player) {
         double max = player.getAttribute(Attribute.MAX_HEALTH).getValue();
         double hp = Math.max(0, player.getHealth());
+        double temp = bodyTemp(player);
+
+        NamedTextColor tempColor = temp >= 37.8 ? NamedTextColor.RED
+            : temp <= 35.5 ? NamedTextColor.AQUA : NamedTextColor.WHITE;
         long time = player.getWorld().getTime();
         int hours = (int) ((time / 1000 + 6) % 24);
         int minutes = (int) (time % 1000 * 60 / 1000);
@@ -148,6 +152,9 @@ public final class HudTask implements Runnable {
             .append(Component.text("❤ ", NamedTextColor.RED))
             .append(Component.text(String.format(Locale.ROOT, "%.0f/%.0f", hp, max),
                 NamedTextColor.WHITE))
+            .append(Component.text("  |  ", NamedTextColor.DARK_GRAY))
+            .append(Component.text("Body Temp: ", NamedTextColor.GRAY))
+            .append(Component.text(String.format(Locale.ROOT, "%.1f°C", temp), tempColor))
             .append(Component.text("  |  ", NamedTextColor.DARK_GRAY))
             .append(Component.text(day ? "☀ " : "☾ ",
                 day ? NamedTextColor.YELLOW : NamedTextColor.BLUE))

@@ -64,6 +64,7 @@ public final class LabraPlugin extends JavaPlugin {
         getServer().getScheduler().runTaskTimer(this, scp1079body, 40L, 1L);            // spots ride the body
         getServer().getScheduler().runTaskTimer(this, scp1079body::slowTick, 40L, 10L); // mess slows those who step in it
         getServer().getPluginManager().registerEvents(new Scp1079Listener(this, registry, scp1079body), this);
+        getServer().getPluginManager().registerEvents(new MopListener(this, registry, scp1079body), this);
         getServer().getPluginManager().registerEvents(new SnackListener(registry), this);
         getServer().getScheduler().runTaskTimer(this, fire, 1200L, 1200L);   // fire housekeeping every minute
         getServer().getScheduler().runTaskTimer(this, fire::sprinklerTick, 40L, 10L);   // active sprinklers
@@ -215,12 +216,13 @@ public final class LabraPlugin extends JavaPlugin {
                                 .forEach(left -> target.getWorld().dropItemNaturally(target.getLocation(), left));
                             sender.sendMessage(Component.text("Gave " + s.display() + " to " + target.getName(), NamedTextColor.AQUA));
                         }
-                        case "scp500bottle", "scp1079packet", "scp1079gum", "scp1079crate" -> {
+                        case "scp500bottle", "scp1079packet", "scp1079gum", "scp1079crate", "mop" -> {
                             if (!sender.hasPermission("lab.give")) return error(sender, "No permission.");
                             ItemStack it = switch (args[1].toLowerCase()) {
                                 case "scp500bottle"  -> registry.buildScp500Bottle();
                                 case "scp1079packet" -> registry.buildScp1079Packet();
                                 case "scp1079gum"    -> registry.buildScp1079Gum();
+                                case "mop"           -> registry.buildMop();
                                 default              -> registry.buildScp1079Crate();
                             };
                             target.getInventory().addItem(it).values()
@@ -511,7 +513,8 @@ public final class LabraPlugin extends JavaPlugin {
                     "pipette", "manual", "table", "element",
                     "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "credit", "credit10", "credit100",
                     "scp268", "scp1499", "scp714", "scp018", "scp427", "scp1033",
-                    "nvg", "nvgred", "nvgblue", "ziptie", "handcuffs", "battery", "medkit", "scp005"), args[1]);
+                    "nvg", "nvgred", "nvgblue", "ziptie", "handcuffs", "battery", "medkit", "scp005",
+                    "scp500bottle", "scp1079packet", "scp1079gum", "scp1079crate", "mop"), args[1]);
                 case "zone" -> filter(Stream.of("add", "remove", "list", "alarm"), args[1]);
                 case "scp1499" -> filter(Stream.of("sethere", "info"), args[1]);
                 case "place" -> filter(MACHINES.stream(), args[1]);

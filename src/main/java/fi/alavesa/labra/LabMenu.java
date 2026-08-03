@@ -169,6 +169,7 @@ public final class LabMenu implements Listener {
         list.add(new Entry(Material.PAPER, "SCP-1079 Gum Packet", NamedTextColor.LIGHT_PURPLE, "lab give scp1079packet", null));
         list.add(new Entry(Material.PAPER, "SCP-1079 Chewing Gum", NamedTextColor.LIGHT_PURPLE, "lab give scp1079gum", null));
         list.add(new Entry(Material.BARREL, "SCP-1079 Crate", NamedTextColor.LIGHT_PURPLE, "lab give scp1079crate", null));
+        list.add(new Entry(Material.BRUSH, "Mop", NamedTextColor.WHITE, "lab give mop", null));
         for (String[] s : new String[][]{{"chip_bag", "Bag of Chips"}, {"canned_drink", "Canned Drink"},
                 {"energy_bar", "Energy Bar"}, {"water_bottle", "Bottled Water"}}) {
             list.add(new Entry(Material.COOKIE, s[1], NamedTextColor.AQUA, "lab give " + s[0], null));

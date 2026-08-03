@@ -180,6 +180,25 @@ public final class LabRegistry {
         item.setItemMeta(meta);
         return item;
     }
+    // The mop: a BRUSH re-skinned to clean up SCP-1079's floor mess.
+    private final NamespacedKey mopKey = new NamespacedKey("labra", "mop");
+
+    public ItemStack buildMop() {
+        ItemStack item = new ItemStack(Material.BRUSH);
+        ItemMeta meta = item.getItemMeta();
+        meta.itemName(Component.text("Mop", NamedTextColor.WHITE).decoration(TextDecoration.ITALIC, false));
+        meta.lore(List.of(
+            Component.text("Right-click a SCP-1079 mess to mop it up.", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false)));
+        setModel(meta, "mop");
+        meta.getPersistentDataContainer().set(mopKey, PersistentDataType.BYTE, (byte) 1);
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    public boolean isMop(ItemStack i) {
+        return i != null && i.hasItemMeta() && i.getItemMeta().getPersistentDataContainer().has(mopKey, PersistentDataType.BYTE);
+    }
+
     public boolean isScp1079Crate(ItemStack i) {
         return i != null && i.hasItemMeta() && i.getItemMeta().getPersistentDataContainer().has(crate1079Key, PersistentDataType.BYTE);
     }
