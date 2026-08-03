@@ -324,6 +324,7 @@ public final class DownedListener implements Listener, Runnable {
     public void onScp500(PlayerItemConsumeEvent event) {
         if (!isScp500(event.getItem())) return;
         Player player = event.getPlayer();
+        plugin.cureScp1079(player);   // the panacea also clears SCP-1079: spots, fever, gum count
         // The message (and the small perk) depend on WHY they took the pill - read the state now,
         // before the datapack's cure runs.
         boolean downed = isDowned(player);

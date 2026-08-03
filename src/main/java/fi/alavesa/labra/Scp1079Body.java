@@ -5,7 +5,9 @@ import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.Particle;
 import org.bukkit.Sound;
+import org.bukkit.Statistic;
 import org.bukkit.World;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.entity.BlockDisplay;
@@ -35,81 +37,122 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * SCP-1079's body-horror side. Chewing more than one gum leaves PINK spots stuck to your body
- * (pink-concrete {@link BlockDisplay}s that ride along, like the ID card's hologram); one more spot
- * per gum. Chew too many and it kills you, splattering a big harmless mess of SCP-1079 on the floor
- * that only SLOWS anyone who steps in it. The chew count lives in a player PDC so the spots survive
- * relogs and deaths (only an overdose - the thing that kills you - wipes it clean again).
+ * SCP-1079's toll. Chewing its gum is counted per SITTING (a run of gums; the count resets after an
+ * hour of playtime without one, or when SCP-500 cures you). The first gum is mild, but each one after
+ * blisters the skin worse - pink-concrete spots grow on the body (BlockDisplays that ride along like
+ * the ID-card hologram), pink blood drips off, a fever climbs, and from the fourth gum the subject
+ * bleeds out. Dying of it splatters a big harmless mess of SCP-1079 that only SLOWS anyone who steps
+ * in it. A death by any OTHER cause just clears the whole thing - it never follows you past the grave.
  */
 public final class Scp1079Body implements Listener, Runnable {
 
     private static final String SPOT_TAG = "lab.scp1079spot";
     private static final String MESS_TAG = "lab.scp1079mess";
     private static final BlockData PINK = Material.PINK_CONCRETE.createBlockData();
+    private static final int GUM_COOLDOWN_TICKS = 40;   // 2 seconds between chews (native icon sweep)
+    private static final double HEART = 2.0;
 
     private final LabraPlugin plugin;
-    /** Live spot displays per player, so we can move and clean them up. */
+    private final FireManager fire;   // the temperature system doubles as the fever
     private final Map<UUID, List<BlockDisplay>> spots = new ConcurrentHashMap<>();
-    /** Active floor messes, expired lazily on the slow tick. */
     private final List<Mess> messes = new ArrayList<>();
+    private int upkeepTick;
 
-    Scp1079Body(LabraPlugin plugin) { this.plugin = plugin; }
+    Scp1079Body(LabraPlugin plugin, FireManager fire) { this.plugin = plugin; this.fire = fire; }
 
     // ------------------------------------------------------------------ config knobs
-    private int lethalChews()   { return Math.max(2, plugin.getConfig().getInt("scp1079.lethal-chews", 6)); }
-    private int messLifetime()  { return Math.max(5, plugin.getConfig().getInt("scp1079.mess-lifetime-seconds", 300)); }
-    private double messRadius()  { return Math.max(0.5, plugin.getConfig().getDouble("scp1079.mess-radius", 2.5)); }
-    private int messSlowLevel() { return Math.max(0, plugin.getConfig().getInt("scp1079.mess-slow-amplifier", 1)); }
+    private int   sittingResetTicks() { return Math.max(1, plugin.getConfig().getInt("scp1079.sitting-reset-minutes", 60)) * 60 * 20; }
+    private int   messLifetime()      { return Math.max(5, plugin.getConfig().getInt("scp1079.mess-lifetime-seconds", 300)); }
+    private double messRadius()       { return Math.max(0.5, plugin.getConfig().getDouble("scp1079.mess-radius", 2.5)); }
+    private int   messSlowLevel()     { return Math.max(0, plugin.getConfig().getInt("scp1079.mess-slow-amplifier", 1)); }
 
     private org.bukkit.NamespacedKey chewsKey() { return plugin.keyOf("scp1079_chews"); }
+    private org.bukkit.NamespacedKey lastPlayKey() { return plugin.keyOf("scp1079_last_play"); }
 
-    private int chews(Player p) {
-        return p.getPersistentDataContainer().getOrDefault(chewsKey(), PersistentDataType.INTEGER, 0);
-    }
-    private void setChews(Player p, int n) {
-        p.getPersistentDataContainer().set(chewsKey(), PersistentDataType.INTEGER, n);
-    }
+    private int chews(Player p) { return p.getPersistentDataContainer().getOrDefault(chewsKey(), PersistentDataType.INTEGER, 0); }
+    private void setChews(Player p, int n) { p.getPersistentDataContainer().set(chewsKey(), PersistentDataType.INTEGER, n); }
+    private int playTicks(Player p) { return p.getStatistic(Statistic.PLAY_ONE_MINUTE); }
 
     // ------------------------------------------------------------------ chewing
 
-    /** Called from {@link Scp1079Listener} after a gum is chewed. Returns true if it was the lethal one. */
-    public boolean onChew(Player p) {
+    /** Called after a gum is chewed. Runs the whole per-gum escalation for this sitting. */
+    public void onChew(Player p) {
+        // New sitting? Reset the count if it's been over an hour of playtime since the last gum.
+        int now = playTicks(p);
+        int last = p.getPersistentDataContainer().getOrDefault(lastPlayKey(), PersistentDataType.INTEGER, now);
+        if (chews(p) > 0 && now - last > sittingResetTicks()) setChews(p, 0);
+        p.getPersistentDataContainer().set(lastPlayKey(), PersistentDataType.INTEGER, now);
+
         int c = chews(p) + 1;
         setChews(p, c);
-        if (c >= lethalChews()) { overdose(p); return true; }
-        if (c >= 2) rebuildSpots(p);   // the second gum is the first visible spot
-        return false;
+
+        // Fever climbs with every gum (the temperature tick ramps toward it gradually).
+        fire.setFever(p.getUniqueId(), c <= 1 ? 0.6 : c == 2 ? 1.3 : c == 3 ? 2.0 : 3.0);
+
+        switch (Math.min(c, 4)) {
+            case 1 -> {
+                // The first gum is nearly all upside - a small pick-me-up - but it stings.
+                p.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, 20 * 5, 0, true, false, true));
+                p.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 20 * 8, 0, true, false, true));
+                p.playSound(p.getLocation(), Sound.ENTITY_GENERIC_EAT, 0.7f, 1.3f);
+                say(p, "You chew on the gum and feel tingly");
+                bleed(p, HEART);
+            }
+            case 2 -> {
+                p.playSound(p.getLocation(), Sound.ENTITY_GENERIC_BURN, 0.8f, 1.0f);
+                p.playSound(p.getLocation(), Sound.BLOCK_LAVA_EXTINGUISH, 0.5f, 1.4f);
+                say(p, "You chew on the gum and your skin grows blisters");
+                bleed(p, HEART);
+            }
+            case 3 -> {
+                p.playSound(p.getLocation(), Sound.ENTITY_GENERIC_BURN, 0.9f, 0.9f);
+                say(p, "You chew on the gum and your skin splits and weeps");
+                bleed(p, HEART);
+            }
+            default -> {   // 4th gum and beyond: exsanguination
+                p.playSound(p.getLocation(), Sound.ENTITY_PLAYER_HURT, 1.0f, 0.7f);
+                p.playSound(p.getLocation(), Sound.ENTITY_GENERIC_BURN, 1.0f, 0.8f);
+                say(p, "You chew on the gum and you start bleeding");
+                bleed(p, HEART);
+            }
+        }
+        if (c >= 2 && !p.isDead()) rebuildSpots(p);   // spots appear at gum two, and grow from there
     }
 
-    /** Kill the player and splatter a harmless slowing mess where they stood. */
-    private void overdose(Player p) {
-        Location loc = p.getLocation();
+    /** Internal bleeding - ignores armour; dropping to zero triggers a normal (mess-spawning) death. */
+    private void bleed(Player p, double amount) {
+        double nh = p.getHealth() - amount;
+        if (nh <= 0.0) p.setHealth(0.0); else p.setHealth(nh);
+    }
+
+    private void say(Player p, String text) {
+        ActionBars.message(p, Component.text(text, NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
+    }
+
+    /** SCP-500 cures SCP-1079 outright: spots gone, fever gone, sitting count back to zero. */
+    public void cure(Player p) {
+        if (chews(p) <= 0 && !spots.containsKey(p.getUniqueId())) return;
         clearSpots(p);
         setChews(p, 0);
-        spawnMess(loc);
-        p.getWorld().playSound(loc, Sound.ENTITY_SLIME_SQUISH, 1.0f, 0.6f);
-        p.getWorld().playSound(loc, Sound.ENTITY_PLAYER_HURT, 1.0f, 0.7f);
-        p.sendMessage(Component.text("One gum too many. SCP-1079 takes you apart.", NamedTextColor.LIGHT_PURPLE)
-            .decoration(TextDecoration.ITALIC, true));
-        p.setHealth(0.0);
+        fire.setFever(p.getUniqueId(), 0);
     }
 
     // ------------------------------------------------------------------ spots that ride the body
 
-    /** Rebuild a player's spots so there are exactly (chews - 1) of them. */
+    /** (Re)build a player's spots: count and size both grow with the gum count. */
     private void rebuildSpots(Player p) {
         clearSpots(p);
-        int want = Math.min(chews(p) - 1, lethalChews() - 1);
-        if (want <= 0) return;
-        List<BlockDisplay> list = new ArrayList<>(want);
-        for (int i = 0; i < want; i++) list.add(spawnSpot(p, i));
+        int c = chews(p);
+        if (c < 2) return;
+        int count = Math.min(c, 6);
+        float scale = (float) (0.20 + (c - 2) * 0.12);   // small cube at gum 2, bigger every gum after
+        List<BlockDisplay> list = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) list.add(spawnSpot(p, i, scale));
         spots.put(p.getUniqueId(), list);
     }
 
-    private BlockDisplay spawnSpot(Player p, int i) {
-        float s = 0.26f + (i % 3) * 0.05f;                 // a little size variety
+    private BlockDisplay spawnSpot(Player p, int i, float s) {
         double angle = i * 2.399963;                       // golden angle - spreads spots around the body
-        // a fixed tilt so the cube looks stuck on at an angle, centred on the entity origin
         AxisAngle4f rot = new AxisAngle4f((float) angle, 0.5774f, 0.5774f, 0.5774f);
         Vector3f half = new Vector3f(s * 0.5f, s * 0.5f, s * 0.5f);
         Vector3f centre = new Quaternionf(rot).transform(new Vector3f(half));
@@ -172,15 +215,20 @@ public final class Scp1079Body implements Listener, Runnable {
             d.setTransformation(xf);
             parts.add(d);
         }
+        w.playSound(at, Sound.ENTITY_SLIME_SQUISH, 1.0f, 0.6f);
         synchronized (messes) {
             messes.add(new Mess(w.getUID(), at.getX(), at.getY(), at.getZ(), rad,
                 System.currentTimeMillis() + messLifetime() * 1000L, parts));
         }
     }
 
-    /** Slow anyone standing in a mess; expire old messes. Scheduled every ~half second. */
+    // ------------------------------------------------------------------ upkeep tick (every ~half second)
+
+    /** Slow anyone in a mess, drip pink blood off the afflicted, and bleed out the worst cases. */
     public void slowTick() {
+        upkeepTick++;
         long now = System.currentTimeMillis();
+        // messes: expire, and slow anyone standing in them
         synchronized (messes) {
             for (Iterator<Mess> it = messes.iterator(); it.hasNext(); ) {
                 Mess m = it.next();
@@ -193,16 +241,31 @@ public final class Scp1079Body implements Listener, Runnable {
                 if (w == null) continue;
                 for (Player p : w.getPlayers()) {
                     double dx = p.getLocation().getX() - m.x, dz = p.getLocation().getZ() - m.z;
-                    double dy = Math.abs(p.getLocation().getY() - m.y);
-                    if (dy <= 1.2 && dx * dx + dz * dz <= m.radius * m.radius) {
+                    if (Math.abs(p.getLocation().getY() - m.y) <= 1.2 && dx * dx + dz * dz <= m.radius * m.radius)
                         p.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, 30, messSlowLevel(), true, false, false));
-                    }
                 }
             }
         }
+        // afflicted players: pink drip + (worse cases) passive bleed. Never touch the dead.
+        for (Player p : plugin.getServer().getOnlinePlayers()) {
+            int c = chews(p);
+            if (c <= 0 || p.isDead() || p.getHealth() <= 0.0) continue;
+            drip(p, c);
+            if (upkeepTick % 4 == 0 && c >= 3) bleed(p, c >= 4 ? HEART : 0.5);   // 3 = a trickle, 4+ = bleeding out
+        }
     }
 
-    // ------------------------------------------------------------------ follow tick
+    /** Pink blood weeping off the spots and pooling at the feet - heavier the more gums were chewed. */
+    private void drip(Player p, int c) {
+        World w = p.getWorld();
+        int intensity = Math.min(c, 4);
+        int spotCount = Math.min(Math.max(c - 1, 1), 6);
+        for (int i = 0; i < spotCount; i++)
+            w.spawnParticle(Particle.FALLING_DUST, bodyPoint(p, i), intensity, 0.05, 0.05, 0.05, 0, PINK);
+        w.spawnParticle(Particle.FALLING_DUST, p.getLocation().add(0, 0.1, 0), intensity * 2, 0.25, 0.02, 0.25, 0, PINK);
+    }
+
+    // ------------------------------------------------------------------ spot-follow tick (every tick)
 
     @Override
     public void run() {
@@ -212,8 +275,7 @@ public final class Scp1079Body implements Listener, Runnable {
             List<BlockDisplay> list = e.getValue();
             for (int i = 0; i < list.size(); i++) {
                 BlockDisplay d = list.get(i);
-                if (d == null || d.isDead()) continue;
-                d.teleport(bodyPoint(p, i));
+                if (d != null && !d.isDead()) d.teleport(bodyPoint(p, i));
             }
         }
     }
@@ -224,14 +286,27 @@ public final class Scp1079Body implements Listener, Runnable {
     @EventHandler public void onWorld(PlayerChangedWorldEvent e) { restoreSoon(e.getPlayer()); }
     @EventHandler public void onRespawn(PlayerRespawnEvent e) { restoreSoon(e.getPlayer()); }
     @EventHandler public void onQuit(PlayerQuitEvent e) { clearSpots(e.getPlayer()); }
-    @EventHandler public void onDeath(PlayerDeathEvent e) { clearSpots(e.getEntity()); }
 
-    /** Recreate spots a tick later (the player's world/location has settled by then). */
+    /** Death wipes SCP-1079 clean - it must not follow you to respawn. A death while bleeding out
+     *  (four-plus gums) splatters the mess; any other death just clears the spots and fever. */
+    @EventHandler
+    public void onDeath(PlayerDeathEvent e) {
+        Player p = e.getEntity();
+        if (chews(p) >= 4) spawnMess(p.getLocation());
+        clearSpots(p);
+        setChews(p, 0);
+        fire.setFever(p.getUniqueId(), 0);
+    }
+
+    /** Recreate spots + fever a tick later (the player's world/location has settled by then). */
     private void restoreSoon(Player p) {
         UUID id = p.getUniqueId();
         plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
             Player online = plugin.getServer().getPlayer(id);
-            if (online != null && online.isOnline() && chews(online) >= 2) rebuildSpots(online);
+            if (online == null || !online.isOnline()) return;
+            int c = chews(online);
+            if (c >= 2) rebuildSpots(online);
+            if (c >= 1) fire.setFever(id, c <= 1 ? 0.6 : c == 2 ? 1.3 : c == 3 ? 2.0 : 3.0);
         }, 5L);
     }
 

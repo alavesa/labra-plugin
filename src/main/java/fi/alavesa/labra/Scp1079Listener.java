@@ -36,8 +36,7 @@ public final class Scp1079Listener implements Listener {
     private final LabraPlugin plugin;
     private final LabRegistry registry;
     private final Scp1079Body body;
-    /** Per-player cooldown (ms) on taking a gum out of a packet. */
-    private final java.util.Map<java.util.UUID, Long> gumCooldown = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final int GUM_COOLDOWN_TICKS = 40;   // 2s between chews (matches the gum's use_cooldown)
 
     public Scp1079Listener(LabraPlugin plugin, LabRegistry registry, Scp1079Body body) {
         this.plugin = plugin;
@@ -45,8 +44,8 @@ public final class Scp1079Listener implements Listener {
         this.body = body;
     }
 
-    private long packetCooldownMs() {
-        return Math.max(0L, plugin.getConfig().getLong("scp1079.packet-cooldown-seconds", 30L)) * 1000L;
+    private int packetCooldownTicks() {
+        return Math.max(0, plugin.getConfig().getInt("scp1079.packet-cooldown-seconds", 2)) * 20;
     }
 
     @EventHandler
@@ -65,32 +64,22 @@ public final class Scp1079Listener implements Listener {
         }
     }
 
-    /** Chew a gum: consume one, grant a brief pick-me-up - and rack up SCP-1079's toll. */
+    /** Chew a gum: the native 2s item cooldown gates the rate; the body handles the toll. */
     private void chew(Player p, ItemStack gum) {
+        if (p.hasCooldown(gum)) return;               // still sweeping - ignore the click
+        p.setCooldown(gum, GUM_COOLDOWN_TICKS);        // white sweep on the gum's own cooldown group
         gum.setAmount(gum.getAmount() - 1);
-        p.playSound(p.getLocation(), Sound.ENTITY_GENERIC_EAT, 0.7f, 1.3f);
-        // Chewing too many kills you; the lethal chew skips the pick-me-up (you're dead).
-        if (body.onChew(p)) return;
-        p.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, 20 * 5, 0, true, false, true));
-        p.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 20 * 8, 0, true, false, true));
-        ActionBars.message(p, line("You chew the gum.", NamedTextColor.LIGHT_PURPLE));
+        body.onChew(p);                                 // message, damage, particles, spots, fever
     }
 
     /** Take one gum out of the packet in hand (if there's room), spending one of its six. */
     private void takeGum(Player p, ItemStack packet) {
-        long now = System.currentTimeMillis();
-        long ready = gumCooldown.getOrDefault(p.getUniqueId(), 0L);
-        if (now < ready) {
-            long secs = (ready - now) / 1000L + 1;
-            ActionBars.message(p, line("The packet is stuck shut - " + secs + "s.", NamedTextColor.RED));
-            p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, 0.7f, 0.8f);
-            return;
-        }
+        if (p.hasCooldown(packet)) return;             // native item cooldown - the white icon sweep
         if (p.getInventory().firstEmpty() == -1) {
             ActionBars.message(p, line("No room for a gum.", NamedTextColor.RED));
             return;
         }
-        gumCooldown.put(p.getUniqueId(), now + packetCooldownMs());
+        p.setCooldown(packet, packetCooldownTicks());
         int taken = registry.scp1079Taken(packet) + 1;
         p.getInventory().addItem(registry.buildScp1079Gum());
         p.playSound(p.getLocation(), Sound.ITEM_BUNDLE_REMOVE_ONE, 0.7f, 1.4f);

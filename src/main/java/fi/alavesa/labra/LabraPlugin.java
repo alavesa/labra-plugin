@@ -58,7 +58,7 @@ public final class LabraPlugin extends JavaPlugin {
         fire = new FireManager(this, registry);
         getServer().getPluginManager().registerEvents(fire, this);
         getServer().getPluginManager().registerEvents(new Scp500BottleListener(this, registry), this);
-        scp1079body = new Scp1079Body(this);
+        scp1079body = new Scp1079Body(this, fire);
         getServer().getPluginManager().registerEvents(scp1079body, this);
         getServer().getScheduler().runTask(this, scp1079body::sweepOrphans);           // clear crash-orphaned spots/messes
         getServer().getScheduler().runTaskTimer(this, scp1079body, 40L, 1L);            // spots ride the body
@@ -583,6 +583,9 @@ public final class LabraPlugin extends JavaPlugin {
 
     /** Hand the player one SCP-500-01 pill (the datapack owns the item). */
     public void giveScp500Pill(Player player) { runAs(player, "lab:give/scp500"); }
+
+    /** SCP-500 cures SCP-1079 (spots, fever and the gum count all clear). */
+    public void cureScp1079(Player player) { if (scp1079body != null) scp1079body.cure(player); }
 
     private List<String> filter(Stream<String> options, String prefix) {
         return options.filter(o -> o.startsWith(prefix.toLowerCase())).sorted().toList();

@@ -70,6 +70,15 @@ public final class LabRegistry {
     private final NamespacedKey scp500BottleKey = new NamespacedKey("labra", "scp500_bottle");
     private final NamespacedKey scp500UsesKey = new NamespacedKey("labra", "scp500_uses");
 
+    /** Give an item Minecraft's native use-cooldown (the white sweep down the icon), on its OWN
+     *  cooldown group so only this item type is gated - not every item sharing its base material. */
+    private void useCooldown(ItemMeta meta, String group, float seconds) {
+        org.bukkit.inventory.meta.components.UseCooldownComponent uc = meta.getUseCooldown();
+        uc.setCooldownSeconds(Math.max(0f, seconds));
+        uc.setCooldownGroup(new NamespacedKey("labra", group));
+        meta.setUseCooldown(uc);
+    }
+
     /** A SCP-500 pill bottle with all three uses left. */
     public ItemStack buildScp500Bottle() { return buildScp500Bottle(0); }
 
@@ -87,6 +96,7 @@ public final class LabRegistry {
         meta.setCustomModelDataComponent(cmd);
         meta.getPersistentDataContainer().set(scp500BottleKey, PersistentDataType.BYTE, (byte) 1);
         meta.getPersistentDataContainer().set(scp500UsesKey, PersistentDataType.INTEGER, Math.max(0, used));
+        useCooldown(meta, "scp500_bottle", plugin.getConfig().getInt("scp500.bottle-cooldown-seconds", 30));
         if (meta instanceof org.bukkit.inventory.meta.Damageable dm) {   // green health bar = pills left
             dm.setMaxDamage(SCP500_BOTTLE_USES);
             dm.setDamage(Math.max(0, Math.min(SCP500_BOTTLE_USES, used)));
@@ -125,6 +135,7 @@ public final class LabRegistry {
             Component.text((SCP1079_PACKET_GUMS - taken) + " / " + SCP1079_PACKET_GUMS + " gums left.", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false),
             Component.text("You can only carry one packet.", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false)));
         setModel(meta, "scp1079_packet");
+        useCooldown(meta, "scp1079_packet", plugin.getConfig().getInt("scp1079.packet-cooldown-seconds", 2));
         meta.getPersistentDataContainer().set(packet1079Key, PersistentDataType.BYTE, (byte) 1);
         meta.getPersistentDataContainer().set(gumsTakenKey, PersistentDataType.INTEGER, Math.max(0, taken));
         if (meta instanceof org.bukkit.inventory.meta.Damageable dm) {
@@ -148,6 +159,7 @@ public final class LabRegistry {
         meta.itemName(Component.text("SCP-1079 Chewing Gum", NamedTextColor.LIGHT_PURPLE).decoration(TextDecoration.ITALIC, false));
         meta.lore(List.of(Component.text("Right-click to chew.", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false)));
         setModel(meta, "scp1079_gum");
+        useCooldown(meta, "scp1079_gum", 2f);   // 2s to chew again - the white icon sweep
         meta.getPersistentDataContainer().set(gum1079Key, PersistentDataType.BYTE, (byte) 1);
         item.setItemMeta(meta);
         return item;
