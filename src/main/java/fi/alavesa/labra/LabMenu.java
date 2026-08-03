@@ -164,6 +164,15 @@ public final class LabMenu implements Listener {
         // --- the E&T maintenance wrench (repairs vending machines)
         list.add(new Entry(Material.BRUSH, "E&T Wrench", NamedTextColor.AQUA,
             "terminal wrench", null));
+        // --- SCP-500 pill bottle + SCP-1079 gum system + snacks
+        list.add(new Entry(Material.GLASS_BOTTLE, "SCP-500 Pill Bottle", NamedTextColor.RED, "lab give scp500bottle", null));
+        list.add(new Entry(Material.PAPER, "SCP-1079 Gum Packet", NamedTextColor.LIGHT_PURPLE, "lab give scp1079packet", null));
+        list.add(new Entry(Material.PAPER, "SCP-1079 Chewing Gum", NamedTextColor.LIGHT_PURPLE, "lab give scp1079gum", null));
+        list.add(new Entry(Material.BARREL, "SCP-1079 Crate", NamedTextColor.LIGHT_PURPLE, "lab give scp1079crate", null));
+        for (String[] s : new String[][]{{"chip_bag", "Bag of Chips"}, {"canned_drink", "Canned Drink"},
+                {"energy_bar", "Energy Bar"}, {"water_bottle", "Bottled Water"}}) {
+            list.add(new Entry(Material.COOKIE, s[1], NamedTextColor.AQUA, "lab give " + s[0], null));
+        }
         return list;
     }
 

@@ -56,6 +56,9 @@ public final class LabraPlugin extends JavaPlugin {
         getServer().getScheduler().runTaskTimer(this, scp018::ballTick, 1L, 1L);
         fire = new FireManager(this, registry);
         getServer().getPluginManager().registerEvents(fire, this);
+        getServer().getPluginManager().registerEvents(new Scp500BottleListener(this, registry), this);
+        getServer().getPluginManager().registerEvents(new Scp1079Listener(this, registry), this);
+        getServer().getPluginManager().registerEvents(new SnackListener(registry), this);
         getServer().getScheduler().runTaskTimer(this, fire, 1200L, 1200L);   // fire housekeeping every minute
         getServer().getScheduler().runTaskTimer(this, fire::sprinklerTick, 40L, 10L);   // active sprinklers
         getServer().getScheduler().runTaskTimer(this, fire::refillMounts, 200L, 200L);  // mounts refill 10%/10s
@@ -197,6 +200,27 @@ public final class LabraPlugin extends JavaPlugin {
                             target.getInventory().addItem(registry.buildSample());
                             sender.sendMessage(Component.text("Gave a radioactive sample to "
                                 + target.getName() + " - careful with it!", NamedTextColor.GREEN));
+                        }
+                        case "chip_bag", "canned_drink", "energy_bar", "water_bottle" -> {
+                            if (!sender.hasPermission("lab.give")) return error(sender, "No permission.");
+                            LabRegistry.Snack s = registry.snack(args[1].toLowerCase());
+                            if (s == null) return error(sender, "Unknown snack.");
+                            target.getInventory().addItem(registry.buildSnack(s)).values()
+                                .forEach(left -> target.getWorld().dropItemNaturally(target.getLocation(), left));
+                            sender.sendMessage(Component.text("Gave " + s.display() + " to " + target.getName(), NamedTextColor.AQUA));
+                        }
+                        case "scp500bottle", "scp1079packet", "scp1079gum", "scp1079crate" -> {
+                            if (!sender.hasPermission("lab.give")) return error(sender, "No permission.");
+                            ItemStack it = switch (args[1].toLowerCase()) {
+                                case "scp500bottle"  -> registry.buildScp500Bottle();
+                                case "scp1079packet" -> registry.buildScp1079Packet();
+                                case "scp1079gum"    -> registry.buildScp1079Gum();
+                                default              -> registry.buildScp1079Crate();
+                            };
+                            target.getInventory().addItem(it).values()
+                                .forEach(left -> target.getWorld().dropItemNaturally(target.getLocation(), left));
+                            sender.sendMessage(Component.text("Gave " + args[1].toLowerCase() + " to "
+                                + target.getName(), NamedTextColor.AQUA));
                         }
                         // lab-datapack items: the plugin is the interface, the
                         // datapack functions stay the engine
@@ -549,6 +573,9 @@ public final class LabraPlugin extends JavaPlugin {
     public org.bukkit.NamespacedKey keyOf(String name) {
         return new org.bukkit.NamespacedKey(this, name);
     }
+
+    /** Hand the player one SCP-500-01 pill (the datapack owns the item). */
+    public void giveScp500Pill(Player player) { runAs(player, "lab:give/scp500"); }
 
     private List<String> filter(Stream<String> options, String prefix) {
         return options.filter(o -> o.startsWith(prefix.toLowerCase())).sorted().toList();

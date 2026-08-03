@@ -65,6 +65,159 @@ public final class LabRegistry {
     public static final int EXTINGUISHER_MAX = 40;
     private final NamespacedKey chargeKey = new NamespacedKey("labra", "ext_charge");
 
+    // SCP-500 pill bottle: dispenses pills, three per bottle (shown as its durability bar).
+    public static final int SCP500_BOTTLE_USES = 3;
+    private final NamespacedKey scp500BottleKey = new NamespacedKey("labra", "scp500_bottle");
+    private final NamespacedKey scp500UsesKey = new NamespacedKey("labra", "scp500_uses");
+
+    /** A SCP-500 pill bottle with all three uses left. */
+    public ItemStack buildScp500Bottle() { return buildScp500Bottle(0); }
+
+    /** A SCP-500 pill bottle with {@code used} pills already taken (drives the green health bar). */
+    public ItemStack buildScp500Bottle(int used) {
+        ItemStack item = new ItemStack(Material.GLASS_BOTTLE);
+        ItemMeta meta = item.getItemMeta();
+        meta.itemName(Component.text("SCP-500 Pill Bottle", NamedTextColor.RED).decoration(TextDecoration.ITALIC, false));
+        meta.lore(List.of(
+            Component.text("Right-click to take a pill.", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
+            Component.text("Sneak + right-click a block to set it down.", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false),
+            Component.text((SCP500_BOTTLE_USES - used) + " / " + SCP500_BOTTLE_USES + " pills left.", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false)));
+        CustomModelDataComponent cmd = meta.getCustomModelDataComponent();
+        cmd.setStrings(List.of("scp500_bottle"));
+        meta.setCustomModelDataComponent(cmd);
+        meta.getPersistentDataContainer().set(scp500BottleKey, PersistentDataType.BYTE, (byte) 1);
+        meta.getPersistentDataContainer().set(scp500UsesKey, PersistentDataType.INTEGER, Math.max(0, used));
+        if (meta instanceof org.bukkit.inventory.meta.Damageable dm) {   // green health bar = pills left
+            dm.setMaxDamage(SCP500_BOTTLE_USES);
+            dm.setDamage(Math.max(0, Math.min(SCP500_BOTTLE_USES, used)));
+        }
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    public boolean isScp500Bottle(ItemStack item) {
+        return item != null && item.hasItemMeta() && item.getItemMeta().getPersistentDataContainer()
+            .has(scp500BottleKey, PersistentDataType.BYTE);
+    }
+
+    public int scp500BottleUses(ItemStack item) {
+        if (!isScp500Bottle(item)) return 0;
+        return item.getItemMeta().getPersistentDataContainer().getOrDefault(scp500UsesKey, PersistentDataType.INTEGER, 0);
+    }
+
+    // ---------------------------------------------------------------- SCP-1079
+
+    public static final int SCP1079_PACKET_GUMS = 6;
+    private final NamespacedKey packet1079Key = new NamespacedKey("labra", "scp1079_packet");
+    private final NamespacedKey gumsTakenKey = new NamespacedKey("labra", "scp1079_taken");
+    private final NamespacedKey gum1079Key   = new NamespacedKey("labra", "scp1079_gum");
+    private final NamespacedKey crate1079Key = new NamespacedKey("labra", "scp1079_crate");
+
+    public ItemStack buildScp1079Packet() { return buildScp1079Packet(0); }
+
+    /** A SCP-1079 gum packet with {@code taken} of its 6 gums already removed (green bar). */
+    public ItemStack buildScp1079Packet(int taken) {
+        ItemStack item = new ItemStack(Material.PAPER);
+        ItemMeta meta = item.getItemMeta();
+        meta.itemName(Component.text("SCP-1079 Gum Packet", NamedTextColor.LIGHT_PURPLE).decoration(TextDecoration.ITALIC, false));
+        meta.lore(List.of(
+            Component.text("Right-click to take a gum.", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
+            Component.text((SCP1079_PACKET_GUMS - taken) + " / " + SCP1079_PACKET_GUMS + " gums left.", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false),
+            Component.text("You can only carry one packet.", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false)));
+        setModel(meta, "scp1079_packet");
+        meta.getPersistentDataContainer().set(packet1079Key, PersistentDataType.BYTE, (byte) 1);
+        meta.getPersistentDataContainer().set(gumsTakenKey, PersistentDataType.INTEGER, Math.max(0, taken));
+        if (meta instanceof org.bukkit.inventory.meta.Damageable dm) {
+            dm.setMaxDamage(SCP1079_PACKET_GUMS);
+            dm.setDamage(Math.max(0, Math.min(SCP1079_PACKET_GUMS, taken)));
+        }
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    public boolean isScp1079Packet(ItemStack i) {
+        return i != null && i.hasItemMeta() && i.getItemMeta().getPersistentDataContainer().has(packet1079Key, PersistentDataType.BYTE);
+    }
+    public int scp1079Taken(ItemStack i) {
+        return isScp1079Packet(i) ? i.getItemMeta().getPersistentDataContainer().getOrDefault(gumsTakenKey, PersistentDataType.INTEGER, 0) : 0;
+    }
+
+    public ItemStack buildScp1079Gum() {
+        ItemStack item = new ItemStack(Material.PAPER);
+        ItemMeta meta = item.getItemMeta();
+        meta.itemName(Component.text("SCP-1079 Chewing Gum", NamedTextColor.LIGHT_PURPLE).decoration(TextDecoration.ITALIC, false));
+        meta.lore(List.of(Component.text("Right-click to chew.", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false)));
+        setModel(meta, "scp1079_gum");
+        meta.getPersistentDataContainer().set(gum1079Key, PersistentDataType.BYTE, (byte) 1);
+        item.setItemMeta(meta);
+        return item;
+    }
+    public boolean isScp1079Gum(ItemStack i) {
+        return i != null && i.hasItemMeta() && i.getItemMeta().getPersistentDataContainer().has(gum1079Key, PersistentDataType.BYTE);
+    }
+
+    public ItemStack buildScp1079Crate() {
+        ItemStack item = new ItemStack(Material.BARREL);
+        ItemMeta meta = item.getItemMeta();
+        meta.itemName(Component.text("SCP-1079 Crate", NamedTextColor.LIGHT_PURPLE).decoration(TextDecoration.ITALIC, false));
+        meta.lore(List.of(
+            Component.text("Sneak + right-click a block to set down.", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
+            Component.text("Right-click the crate to take a packet.", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false)));
+        setModel(meta, "scp1079_crate");
+        meta.getPersistentDataContainer().set(crate1079Key, PersistentDataType.BYTE, (byte) 1);
+        item.setItemMeta(meta);
+        return item;
+    }
+    public boolean isScp1079Crate(ItemStack i) {
+        return i != null && i.hasItemMeta() && i.getItemMeta().getPersistentDataContainer().has(crate1079Key, PersistentDataType.BYTE);
+    }
+
+    // ------------------------------------------------------------------ snacks
+
+    /** A consumable snack (chip bag / canned drink / ...) that grants a short buff when eaten. Defined
+     *  by id -> {base material, model, effect}; the effect is applied by {@link SnackListener}. */
+    public record Snack(String id, Material base, String model, String display,
+                        org.bukkit.potion.PotionEffectType effect, int seconds, int amplifier) { }
+
+    private final java.util.Map<String, Snack> snacks = new java.util.LinkedHashMap<>();
+    { // built-in snacks (custom models to be textured in the pack)
+        addSnack(new Snack("chip_bag",    Material.PAPER, "snack_chip_bag",    "Bag of Chips",   org.bukkit.potion.PotionEffectType.REGENERATION, 5, 0));
+        addSnack(new Snack("canned_drink",Material.PAPER, "snack_canned_drink","Canned Drink",   org.bukkit.potion.PotionEffectType.SPEED,        10, 0));
+        addSnack(new Snack("energy_bar",  Material.PAPER, "snack_energy_bar",  "Energy Bar",     org.bukkit.potion.PotionEffectType.HASTE,        15, 0));
+        addSnack(new Snack("water_bottle",Material.PAPER, "snack_water_bottle","Bottled Water",  org.bukkit.potion.PotionEffectType.SATURATION,   3, 0));
+    }
+    private void addSnack(Snack s) { snacks.put(s.id(), s); }
+    public java.util.Collection<Snack> snacks() { return snacks.values(); }
+    public Snack snack(String id) { return id == null ? null : snacks.get(id.toLowerCase()); }
+
+    private final NamespacedKey snackKey = new NamespacedKey("labra", "snack");
+    public ItemStack buildSnack(Snack s) {
+        ItemStack item = new ItemStack(s.base());
+        ItemMeta meta = item.getItemMeta();
+        meta.itemName(Component.text(s.display(), NamedTextColor.AQUA).decoration(TextDecoration.ITALIC, false));
+        meta.lore(List.of(
+            Component.text("Right-click to eat.", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
+            Component.text(prettyEffect(s.effect()) + " for " + s.seconds() + "s.", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false)));
+        setModel(meta, s.model());
+        meta.getPersistentDataContainer().set(snackKey, PersistentDataType.STRING, s.id());
+        item.setItemMeta(meta);
+        return item;
+    }
+    public String snackId(ItemStack i) {
+        if (i == null || !i.hasItemMeta()) return null;
+        return i.getItemMeta().getPersistentDataContainer().get(snackKey, PersistentDataType.STRING);
+    }
+
+    private String prettyEffect(org.bukkit.potion.PotionEffectType t) {
+        return t.getKey().getKey().replace('_', ' ');
+    }
+
+    private void setModel(ItemMeta meta, String model) {
+        CustomModelDataComponent cmd = meta.getCustomModelDataComponent();
+        cmd.setStrings(List.of(model));
+        meta.setCustomModelDataComponent(cmd);
+    }
+
     /** The held fire extinguisher: right-click sprays and puts out fire. Full. */
     /** Physical credit cash - built in-plugin (no datapack dependency). Right-clicking
      *  banks it into the credit balance (see CreditListener). */

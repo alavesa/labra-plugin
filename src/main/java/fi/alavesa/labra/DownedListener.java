@@ -324,7 +324,33 @@ public final class DownedListener implements Listener, Runnable {
     public void onScp500(PlayerItemConsumeEvent event) {
         if (!isScp500(event.getItem())) return;
         Player player = event.getPlayer();
-        if (isDowned(player)) revive(player);
+        // The message (and the small perk) depend on WHY they took the pill - read the state now,
+        // before the datapack's cure runs.
+        boolean downed = isDowned(player);
+        boolean infected = infectionScore(player) > 0;
+        double hp = player.getHealth();
+        double maxHp = player.getAttribute(org.bukkit.attribute.Attribute.MAX_HEALTH).getValue();
+        if (downed) {
+            revive(player);
+            ActionBars.message(player, line("You swallow the pill and your injuries go away", NamedTextColor.GRAY));
+        } else if (infected) {
+            ActionBars.message(player, line("Your vision clears", NamedTextColor.GRAY));
+        } else if (hp >= maxHp - 0.01) {
+            player.addPotionEffect(new org.bukkit.potion.PotionEffect(
+                org.bukkit.potion.PotionEffectType.SPEED, 20 * 120, 0, true, false, true));   // Speed I, 2 min
+            ActionBars.message(player, line("You swallow the pill", NamedTextColor.GRAY));
+        } else {
+            ActionBars.message(player, line("You swallow the pill and feel fine again", NamedTextColor.GRAY));
+        }
+    }
+
+    /** The player's SCP-008 infection score (lab.z008), or 0 if not infected. */
+    private int infectionScore(Player player) {
+        var board = org.bukkit.Bukkit.getScoreboardManager().getMainScoreboard();
+        org.bukkit.scoreboard.Objective o = board.getObjective("lab.z008");
+        if (o == null) return 0;
+        var s = o.getScore(player.getName());
+        return s.isScoreSet() ? Math.max(0, s.getScore()) : 0;
     }
 
     private void spend(Player medic) {
