@@ -28,6 +28,7 @@ public final class LabraPlugin extends JavaPlugin {
     private HudTask hud;
     private Scp268Listener scp268;
     private Scp018Listener scp018;
+    private Scp1079Body scp1079body;
     private FireManager fire;
 
     @Override
@@ -57,7 +58,12 @@ public final class LabraPlugin extends JavaPlugin {
         fire = new FireManager(this, registry);
         getServer().getPluginManager().registerEvents(fire, this);
         getServer().getPluginManager().registerEvents(new Scp500BottleListener(this, registry), this);
-        getServer().getPluginManager().registerEvents(new Scp1079Listener(this, registry), this);
+        scp1079body = new Scp1079Body(this);
+        getServer().getPluginManager().registerEvents(scp1079body, this);
+        getServer().getScheduler().runTask(this, scp1079body::sweepOrphans);           // clear crash-orphaned spots/messes
+        getServer().getScheduler().runTaskTimer(this, scp1079body, 40L, 1L);            // spots ride the body
+        getServer().getScheduler().runTaskTimer(this, scp1079body::slowTick, 40L, 10L); // mess slows those who step in it
+        getServer().getPluginManager().registerEvents(new Scp1079Listener(this, registry, scp1079body), this);
         getServer().getPluginManager().registerEvents(new SnackListener(registry), this);
         getServer().getScheduler().runTaskTimer(this, fire, 1200L, 1200L);   // fire housekeeping every minute
         getServer().getScheduler().runTaskTimer(this, fire::sprinklerTick, 40L, 10L);   // active sprinklers
@@ -115,6 +121,7 @@ public final class LabraPlugin extends JavaPlugin {
         if (hud != null) hud.shutdown();
         if (scp268 != null) scp268.shutdown();
         if (scp018 != null) scp018.shutdown();
+        if (scp1079body != null) scp1079body.shutdown();
     }
 
     /** /credits - check or move the credit balance. */

@@ -35,10 +35,18 @@ public final class Scp1079Listener implements Listener {
     private static final long LOCK_MS = 30L * 60L * 1000L;
     private final LabraPlugin plugin;
     private final LabRegistry registry;
+    private final Scp1079Body body;
+    /** Per-player cooldown (ms) on taking a gum out of a packet. */
+    private final java.util.Map<java.util.UUID, Long> gumCooldown = new java.util.concurrent.ConcurrentHashMap<>();
 
-    public Scp1079Listener(LabraPlugin plugin, LabRegistry registry) {
+    public Scp1079Listener(LabraPlugin plugin, LabRegistry registry, Scp1079Body body) {
         this.plugin = plugin;
         this.registry = registry;
+        this.body = body;
+    }
+
+    private long packetCooldownMs() {
+        return Math.max(0L, plugin.getConfig().getLong("scp1079.packet-cooldown-seconds", 30L)) * 1000L;
     }
 
     @EventHandler
@@ -57,21 +65,32 @@ public final class Scp1079Listener implements Listener {
         }
     }
 
-    /** Chew a gum: consume one, grant a brief pick-me-up. */
+    /** Chew a gum: consume one, grant a brief pick-me-up - and rack up SCP-1079's toll. */
     private void chew(Player p, ItemStack gum) {
-        p.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, 20 * 5, 0, true, false, true));
-        p.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 20 * 8, 0, true, false, true));
         gum.setAmount(gum.getAmount() - 1);
         p.playSound(p.getLocation(), Sound.ENTITY_GENERIC_EAT, 0.7f, 1.3f);
+        // Chewing too many kills you; the lethal chew skips the pick-me-up (you're dead).
+        if (body.onChew(p)) return;
+        p.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, 20 * 5, 0, true, false, true));
+        p.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 20 * 8, 0, true, false, true));
         ActionBars.message(p, line("You chew the gum.", NamedTextColor.LIGHT_PURPLE));
     }
 
     /** Take one gum out of the packet in hand (if there's room), spending one of its six. */
     private void takeGum(Player p, ItemStack packet) {
+        long now = System.currentTimeMillis();
+        long ready = gumCooldown.getOrDefault(p.getUniqueId(), 0L);
+        if (now < ready) {
+            long secs = (ready - now) / 1000L + 1;
+            ActionBars.message(p, line("The packet is stuck shut - " + secs + "s.", NamedTextColor.RED));
+            p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, 0.7f, 0.8f);
+            return;
+        }
         if (p.getInventory().firstEmpty() == -1) {
             ActionBars.message(p, line("No room for a gum.", NamedTextColor.RED));
             return;
         }
+        gumCooldown.put(p.getUniqueId(), now + packetCooldownMs());
         int taken = registry.scp1079Taken(packet) + 1;
         p.getInventory().addItem(registry.buildScp1079Gum());
         p.playSound(p.getLocation(), Sound.ITEM_BUNDLE_REMOVE_ONE, 0.7f, 1.4f);

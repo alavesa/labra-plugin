@@ -31,6 +31,8 @@ public final class Scp500BottleListener implements Listener {
     private static final String TAG = "lab.scp500bottle";
     private final LabraPlugin plugin;
     private final LabRegistry registry;
+    /** Per-player cooldown (ms) on shaking a pill out of a bottle. */
+    private final java.util.Map<java.util.UUID, Long> pillCooldown = new java.util.concurrent.ConcurrentHashMap<>();
 
     public Scp500BottleListener(LabraPlugin plugin, LabRegistry registry) {
         this.plugin = plugin;
@@ -38,6 +40,10 @@ public final class Scp500BottleListener implements Listener {
     }
 
     private org.bukkit.NamespacedKey usesKey() { return plugin.keyOf("scp500_uses"); }
+
+    private long bottleCooldownMs() {
+        return Math.max(0L, plugin.getConfig().getLong("scp500.bottle-cooldown-seconds", 30L)) * 1000L;
+    }
 
     @EventHandler
     public void onUse(PlayerInteractEvent event) {
@@ -58,11 +64,20 @@ public final class Scp500BottleListener implements Listener {
 
     /** Take one pill out of the bottle in hand (if there's room), spending a use. */
     private void dispensePill(Player p, ItemStack bottle) {
+        long now = System.currentTimeMillis();
+        long ready = pillCooldown.getOrDefault(p.getUniqueId(), 0L);
+        if (now < ready) {
+            long secs = (ready - now) / 1000L + 1;
+            ActionBars.message(p, line("The cap won't budge yet - " + secs + "s.", NamedTextColor.RED));
+            p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, 0.7f, 0.8f);
+            return;
+        }
         if (p.getInventory().firstEmpty() == -1) {
             ActionBars.message(p, line("No room for a pill.", NamedTextColor.RED));
             p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, 0.7f, 0.7f);
             return;
         }
+        pillCooldown.put(p.getUniqueId(), now + bottleCooldownMs());
         int used = registry.scp500BottleUses(bottle) + 1;
         plugin.giveScp500Pill(p);
         p.playSound(p.getLocation(), Sound.ITEM_BOTTLE_FILL, 0.7f, 1.4f);
