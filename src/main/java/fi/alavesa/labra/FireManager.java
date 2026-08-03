@@ -303,6 +303,13 @@ public final class FireManager implements Listener, Runnable {
             titleLine = titleLine.append(ActionBars.spacer(-GLYPH_ADVANCE / 2)).append(glyph)
                 .append(ActionBars.spacer(-GLYPH_ADVANCE / 2));
         }
+        // SCP-008 infection tint: a red vignette overlay while lab.z008 is running, composed net-zero
+        // (full-screen, centred) just like the headgear glyph so it layers on top without shifting anything.
+        Component infGlyph = infection008Glyph(p);
+        if (infGlyph != null) {
+            titleLine = titleLine.append(ActionBars.spacer(-GLYPH_ADVANCE / 2)).append(infGlyph)
+                .append(ActionBars.spacer(-GLYPH_ADVANCE / 2));
+        }
 
         // Subtitle carries the medkit meter OR a transient message (e.g. the SCP-008 injection
         // notice), centred, composed into THIS single title send so it never flickers with any
@@ -340,6 +347,14 @@ public final class FireManager implements Listener, Runnable {
                 .font(net.kyori.adventure.key.Key.key("lab", "nvg")).color(NamedTextColor.WHITE);
         }
         return null;
+    }
+
+    /** The SCP-008 infection tint: a red vignette overlay glyph while the lab.z008 timeline is running,
+     *  or null when the player isn't infected. */
+    private Component infection008Glyph(Player p) {
+        if (!flagSet(p, "lab.z008")) return null;
+        return Component.text("\ue000")
+            .font(net.kyori.adventure.key.Key.key("lab", "overlay008")).color(NamedTextColor.WHITE);
     }
 
     /** How many of the 26 surrounding blocks are also fire. */
