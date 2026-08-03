@@ -58,7 +58,7 @@ public final class LabraPlugin extends JavaPlugin {
         fire = new FireManager(this, registry);
         getServer().getPluginManager().registerEvents(fire, this);
         getServer().getPluginManager().registerEvents(new Scp500BottleListener(this, registry), this);
-        scp1079body = new Scp1079Body(this, fire);
+        scp1079body = new Scp1079Body(this);
         getServer().getPluginManager().registerEvents(scp1079body, this);
         getServer().getScheduler().runTask(this, scp1079body::sweepOrphans);           // clear crash-orphaned spots/messes
         getServer().getScheduler().runTaskTimer(this, scp1079body, 40L, 1L);            // spots ride the body
@@ -72,7 +72,6 @@ public final class LabraPlugin extends JavaPlugin {
         getServer().getScheduler().runTaskTimer(this, fire::spreadTick, 40L, 6L);        // burning players trail fire
         getServer().getScheduler().runTaskTimer(this, fire::ductSpreadTick, 60L, 40L);   // fire creeps through ducts
         getServer().getScheduler().runTaskTimer(this, fire::maskTick, 40L, 2L);           // unified title HUD (credits/stash/medkit/mask)
-        getServer().getScheduler().runTaskTimer(this, fire::temperatureTick, 40L, 10L);   // body heat near fire (0.1C/step)
         Scp038Listener scp038 = new Scp038Listener(this);
         getServer().getPluginManager().registerEvents(scp038, this);
         getServer().getScheduler().runTaskTimer(this, scp038, 40L, 20L);

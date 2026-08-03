@@ -531,34 +531,20 @@ public final class FireManager implements Listener, Runnable {
     private static final double MIN_FIRE_RISE = 1.0;
     private static final double HEAT_RADIUS = 5.0;
     private final java.util.Map<UUID, Double> bodyTemp = new java.util.HashMap<>();
-    /** Extra target °C from illness (e.g. SCP-1079 poisoning) - a fever on top of ambient heat. */
-    private final java.util.Map<UUID, Double> fever = new java.util.concurrent.ConcurrentHashMap<>();
     private int tempTick;
 
-    /** Set (or clear, with 0) a player's fever - degrees added onto their target body temperature.
-     *  The temperature tick then ramps toward it 0.1 °C at a time, so the fever grows in gradually. */
-    public void setFever(UUID player, double celsius) {
-        if (celsius <= 0) fever.remove(player); else fever.put(player, celsius);
-    }
-
-    /** Every half-second: nudge each player's body temperature 0.1 C toward its
-     *  target (raised by nearby fire, decaying back to normal otherwise), and show
-     *  it on the action bar while it's above normal. */
+    /** Body temperature is still TRACKED (nearby fire warms you), but its actionbar readout was
+     *  removed - the 🌡 line was spamming the shared actionbar every half-second and clobbering
+     *  every other message. Nothing displays it now; kept only for any system that reads the value. */
     public void temperatureTick() {
         tempTick++;
         for (Player p : plugin.getServer().getOnlinePlayers()) {
             double temp = bodyTemp.getOrDefault(p.getUniqueId(), BASE_TEMP);
-            double target = BASE_TEMP + fireHeat(p) + fever.getOrDefault(p.getUniqueId(), 0.0);
+            double target = BASE_TEMP + fireHeat(p);
             if (temp < target - 1e-6) temp = Math.min(target, temp + TEMP_STEP);
             else if (temp > target + 1e-6) temp = Math.max(target, temp - TEMP_STEP);
             temp = Math.round(temp * 10.0) / 10.0;
             bodyTemp.put(p.getUniqueId(), temp);
-            if (temp > BASE_TEMP + 1e-6 && tempTick % 4 == 0) {
-                NamedTextColor c = temp >= 38.5 ? NamedTextColor.RED
-                    : temp >= 37.7 ? NamedTextColor.GOLD : NamedTextColor.YELLOW;
-                ActionBars.message(p, Component.text(
-                    String.format(java.util.Locale.ROOT, "🌡 %.1f°C", temp), c));
-            }
         }
     }
 

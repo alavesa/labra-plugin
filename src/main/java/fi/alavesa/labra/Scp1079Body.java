@@ -53,12 +53,26 @@ public final class Scp1079Body implements Listener, Runnable {
     private static final double HEART = 2.0;
 
     private final LabraPlugin plugin;
-    private final FireManager fire;   // the temperature system doubles as the fever
     private final Map<UUID, List<BlockDisplay>> spots = new ConcurrentHashMap<>();
     private final List<Mess> messes = new ArrayList<>();
     private int upkeepTick;
 
-    Scp1079Body(LabraPlugin plugin, FireManager fire) { this.plugin = plugin; this.fire = fire; }
+    Scp1079Body(LabraPlugin plugin) { this.plugin = plugin; }
+
+    /** The fever: sickly effects that build with the gum count. No temperature readout (that was
+     *  removed) - you FEEL it (dizzy, weak, queasy). Re-applied each upkeep so it persists. */
+    private void applyFever(Player p, int c) {
+        if (c < 2) return;
+        p.addPotionEffect(new PotionEffect(PotionEffectType.WEAKNESS, 60, Math.min(c - 2, 2), true, false, false));
+        if (c >= 3) p.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, 80, 0, true, false, false));
+        if (c >= 4) p.addPotionEffect(new PotionEffect(PotionEffectType.HUNGER, 60, 0, true, false, false));
+    }
+
+    private void clearFever(Player p) {
+        p.removePotionEffect(PotionEffectType.WEAKNESS);
+        p.removePotionEffect(PotionEffectType.NAUSEA);
+        p.removePotionEffect(PotionEffectType.HUNGER);
+    }
 
     // ------------------------------------------------------------------ config knobs
     private int   sittingResetTicks() { return Math.max(1, plugin.getConfig().getInt("scp1079.sitting-reset-minutes", 60)) * 60 * 20; }
@@ -86,8 +100,7 @@ public final class Scp1079Body implements Listener, Runnable {
         int c = chews(p) + 1;
         setChews(p, c);
 
-        // Fever climbs with every gum (the temperature tick ramps toward it gradually).
-        fire.setFever(p.getUniqueId(), c <= 1 ? 0.6 : c == 2 ? 1.3 : c == 3 ? 2.0 : 3.0);
+        applyFever(p, c);   // the fever grows with every gum (dizzy/weak/queasy, no readout)
 
         switch (Math.min(c, 4)) {
             case 1 -> {
@@ -134,7 +147,7 @@ public final class Scp1079Body implements Listener, Runnable {
         if (chews(p) <= 0 && !spots.containsKey(p.getUniqueId())) return;
         clearSpots(p);
         setChews(p, 0);
-        fire.setFever(p.getUniqueId(), 0);
+        clearFever(p);
     }
 
     // ------------------------------------------------------------------ spots that ride the body
@@ -250,6 +263,7 @@ public final class Scp1079Body implements Listener, Runnable {
         for (Player p : plugin.getServer().getOnlinePlayers()) {
             int c = chews(p);
             if (c <= 0 || p.isDead() || p.getHealth() <= 0.0) continue;
+            applyFever(p, c);   // keep the fever topped up
             drip(p, c);
             if (upkeepTick % 4 == 0 && c >= 3) bleed(p, c >= 4 ? HEART : 0.5);   // 3 = a trickle, 4+ = bleeding out
         }
@@ -295,7 +309,7 @@ public final class Scp1079Body implements Listener, Runnable {
         if (chews(p) >= 4) spawnMess(p.getLocation());
         clearSpots(p);
         setChews(p, 0);
-        fire.setFever(p.getUniqueId(), 0);
+        clearFever(p);
     }
 
     /** Recreate spots + fever a tick later (the player's world/location has settled by then). */
@@ -306,7 +320,7 @@ public final class Scp1079Body implements Listener, Runnable {
             if (online == null || !online.isOnline()) return;
             int c = chews(online);
             if (c >= 2) rebuildSpots(online);
-            if (c >= 1) fire.setFever(id, c <= 1 ? 0.6 : c == 2 ? 1.3 : c == 3 ? 2.0 : 3.0);
+            applyFever(online, c);
         }, 5L);
     }
 
