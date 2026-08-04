@@ -75,13 +75,11 @@ public final class Scp1079Body implements Listener, Runnable {
     private void applyFever(Player p, int c) {
         if (c < 2) return;
         p.addPotionEffect(new PotionEffect(PotionEffectType.WEAKNESS, 60, Math.min(c - 2, 2), true, false, false));
-        if (c >= 3) p.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, 80, 0, true, false, false));
         if (c >= 4) p.addPotionEffect(new PotionEffect(PotionEffectType.HUNGER, 60, 0, true, false, false));
     }
 
     private void clearFever(Player p) {
         p.removePotionEffect(PotionEffectType.WEAKNESS);
-        p.removePotionEffect(PotionEffectType.NAUSEA);
         p.removePotionEffect(PotionEffectType.HUNGER);
     }
 

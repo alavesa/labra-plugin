@@ -29,6 +29,7 @@ public final class LabraPlugin extends JavaPlugin {
     private Scp268Listener scp268;
     private Scp018Listener scp018;
     private Scp1079Body scp1079body;
+    private Scp1079Crate scp1079crate;
     private FireManager fire;
 
     @Override
@@ -63,7 +64,13 @@ public final class LabraPlugin extends JavaPlugin {
         getServer().getScheduler().runTask(this, scp1079body::sweepOrphans);           // clear crash-orphaned spots/messes
         getServer().getScheduler().runTaskTimer(this, scp1079body, 40L, 1L);            // spots ride the body
         getServer().getScheduler().runTaskTimer(this, scp1079body::slowTick, 40L, 10L); // mess slows those who step in it
-        getServer().getPluginManager().registerEvents(new Scp1079Listener(this, registry, scp1079body), this);
+        scp1079crate = new Scp1079Crate(this, registry);
+        getServer().getPluginManager().registerEvents(scp1079crate, this);
+        getServer().getScheduler().runTask(this, scp1079crate::rescan);                      // find crates already placed
+        getServer().getScheduler().runTaskTimer(this, scp1079crate::physicsTick, 40L, 2L);   // pushable + gravity
+        getServer().getScheduler().runTaskTimer(this, scp1079crate::rescan, 100L, 100L);     // pick up chunk-loaded crates
+        getServer().getScheduler().runTaskTimer(this, scp1079crate::idleTick, 200L, 200L);   // idle crates return home
+        getServer().getPluginManager().registerEvents(new Scp1079Listener(this, registry, scp1079body, scp1079crate), this);
         getServer().getScheduler().runTaskTimer(this, new MopListener(this, registry, scp1079body), 40L, 2L);   // scrub-while-held
         getServer().getPluginManager().registerEvents(new SnackListener(registry), this);
         getServer().getScheduler().runTaskTimer(this, fire, 1200L, 1200L);   // fire housekeeping every minute
@@ -122,6 +129,7 @@ public final class LabraPlugin extends JavaPlugin {
         if (scp268 != null) scp268.shutdown();
         if (scp018 != null) scp018.shutdown();
         if (scp1079body != null) scp1079body.shutdown();
+        if (scp1079crate != null) scp1079crate.shutdown();
     }
 
     /** /credits - check or move the credit balance. */
