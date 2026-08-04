@@ -242,14 +242,19 @@ public final class DownedListener implements Listener, Runnable {
             float progress = Math.max(0f, Math.min(1f, p.getHandRaisedTime() / 60f));   // 3s = 60t
             boolean onOther = target != p;
             String who = onOther ? target.getName() : "yourself";
-            int pct = Math.round(progress * 100);
-            // Plain text only - no bar glyphs of any kind. "Treating X  70%" counting up
-            // over the 3-second hold. Published for FireManager to compose with the credits.
+            // A CUSTOM-TEXTURED first-aid bar (SCP:CB style) that fills UP over the hold: one of 11
+            // frame glyphs in the lab:hud font, picked by progress. Only the glyph uses that font;
+            // the "Treating X" label stays in the normal font. Composed with the credits by FireManager.
+            int frame = Math.round(progress * 10);   // 0..10
+            net.kyori.adventure.text.Component bar = net.kyori.adventure.text.Component
+                .text(new String(Character.toChars(0xE240 + frame)))
+                .font(net.kyori.adventure.key.Key.key("lab:hud"));
             net.kyori.adventure.text.Component meter = net.kyori.adventure.text.Component
                 .text("Treating ", NamedTextColor.WHITE)
                 .append(net.kyori.adventure.text.Component.text(who,
                     onOther ? NamedTextColor.AQUA : NamedTextColor.GREEN))
-                .append(net.kyori.adventure.text.Component.text("  " + pct + "%", NamedTextColor.GREEN));
+                .append(net.kyori.adventure.text.Component.text("  "))
+                .append(bar);
             MEDKIT_METER.put(id, meter);
         }
     }

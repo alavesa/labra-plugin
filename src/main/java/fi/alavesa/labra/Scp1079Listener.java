@@ -3,7 +3,9 @@ package fi.alavesa.labra;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.Sound;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Entity;
@@ -13,16 +15,22 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.player.PlayerInteractAtEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
+import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.util.Transformation;
 import org.joml.AxisAngle4f;
 import org.joml.Vector3f;
+
+import java.util.UUID;
 
 /**
  * SCP-1079: a gum PACKET holds six gums (right-click to take one; green bar), and a placeable CRATE
@@ -91,8 +99,13 @@ public final class Scp1079Listener implements Listener {
 
     // --------------------------------------------------------------- crate
 
+    private static final int PACKET_SLOT = 13;
+    private org.bukkit.NamespacedKey readyKey() { return plugin.keyOf("scp1079_crate_ready"); }
+    private org.bukkit.NamespacedKey lockKey() { return plugin.keyOf("scp1079_lock"); }
+
     private void placeCrate(Player p, Location at) {
         at.setYaw(Math.round(p.getLocation().getYaw() / 90f) * 90f);
+        long now = System.currentTimeMillis();
         at.getWorld().spawn(at, ItemDisplay.class, d -> {
             d.setItemStack(registry.buildScp1079Crate());
             d.setTransformation(new Transformation(new Vector3f(0, -0.4f, 0), new AxisAngle4f(0, 0, 0, 1),
@@ -104,38 +117,79 @@ public final class Scp1079Listener implements Listener {
             a.setVisible(false); a.setGravity(false); a.setBasePlate(false); a.setMarker(false);
             a.setPersistent(true); a.setRemoveWhenFarAway(false);
             a.addScoreboardTag(TAG);
+            a.getPersistentDataContainer().set(readyKey(), PersistentDataType.LONG, now);   // stocked with one on placement
         });
         if (registry.isScp1079Crate(p.getInventory().getItemInMainHand())) p.getInventory().getItemInMainHand().setAmount(0);
         else p.getInventory().getItemInOffHand().setAmount(0);
         at.getWorld().playSound(at, Sound.BLOCK_WOOD_PLACE, 0.7f, 1.0f);
     }
 
-    /** Right-click the placed crate: take a packet, subject to the one-at-a-time + 30-min lock. */
+    /** Right-click the placed crate: OPEN it (always allowed). Whether a packet can be taken is
+     *  decided on click, inside the GUI. */
     @EventHandler
     public void onCrateRightClick(PlayerInteractAtEntityEvent event) {
         Entity e = event.getRightClicked();
         if (!(e instanceof ArmorStand) || !e.getScoreboardTags().contains(TAG)) return;
         event.setCancelled(true);
         if (event.getHand() != EquipmentSlot.HAND) return;
-        Player p = event.getPlayer();
-        if (hasPacket(p)) {
-            ActionBars.message(p, line("You can only carry one gum packet.", NamedTextColor.RED));
-            p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, 0.7f, 0.7f);
-            return;
-        }
+        openCrate(event.getPlayer(), (ArmorStand) e);
+    }
+
+    private void openCrate(Player p, ArmorStand crate) {
+        Inventory inv = Bukkit.createInventory(new CrateHolder(crate.getUniqueId()), 27,
+            Component.text("SCP-1079 Crate", NamedTextColor.LIGHT_PURPLE));
+        ItemStack pane = named(Material.GRAY_STAINED_GLASS_PANE, " ");
+        for (int i = 0; i < inv.getSize(); i++) inv.setItem(i, pane);
+        long ready = crate.getPersistentDataContainer().getOrDefault(readyKey(), PersistentDataType.LONG, 0L);
+        inv.setItem(PACKET_SLOT, System.currentTimeMillis() >= ready
+            ? registry.buildScp1079Packet() : restockingIcon(ready - System.currentTimeMillis()));
+        p.openInventory(inv);
+        p.playSound(p.getLocation(), Sound.BLOCK_BARREL_OPEN, 0.7f, 1.1f);
+    }
+
+    /** Click inside a crate GUI: the only takeable thing is the packet in the middle, and only if the
+     *  crate has restocked AND this player hasn't taken one in the last 30 minutes. */
+    @EventHandler
+    public void onCrateClick(InventoryClickEvent event) {
+        if (!(event.getInventory().getHolder() instanceof CrateHolder holder)) return;
+        event.setCancelled(true);   // it's a dispenser window - nothing goes in, only the packet comes out
+        if (event.getRawSlot() != PACKET_SLOT || !(event.getWhoClicked() instanceof Player p)) return;
+        Entity ent = Bukkit.getEntity(holder.crate);
+        if (!(ent instanceof ArmorStand crate) || !crate.getScoreboardTags().contains(TAG)) { p.closeInventory(); return; }
+
         long now = System.currentTimeMillis();
-        long lock = p.getPersistentDataContainer().getOrDefault(plugin.keyOf("scp1079_lock"), PersistentDataType.LONG, 0L);
-        if (now < lock) {
-            long mins = (lock - now) / 60000L + 1;
-            ActionBars.message(p, line("The dispenser is jammed for you. Try again in " + mins + " min.", NamedTextColor.RED));
-            p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, 0.7f, 0.6f);
-            return;
-        }
-        if (p.getInventory().firstEmpty() == -1) { ActionBars.message(p, line("No room for a packet.", NamedTextColor.RED)); return; }
+        long ready = crate.getPersistentDataContainer().getOrDefault(readyKey(), PersistentDataType.LONG, 0L);
+        if (now < ready) { deny(p, "The crate is restocking - " + mins(ready - now) + " min."); return; }
+        long lock = p.getPersistentDataContainer().getOrDefault(lockKey(), PersistentDataType.LONG, 0L);
+        if (now < lock) { deny(p, "You already took a packet - " + mins(lock - now) + " min."); return; }
+        if (hasPacket(p)) { deny(p, "You can only carry one gum packet."); return; }
+        if (p.getInventory().firstEmpty() == -1) { deny(p, "No room for a packet."); return; }
+
         p.getInventory().addItem(registry.buildScp1079Packet());
-        p.getPersistentDataContainer().set(plugin.keyOf("scp1079_lock"), PersistentDataType.LONG, now + LOCK_MS);
-        p.playSound(p.getLocation(), Sound.BLOCK_BARREL_OPEN, 0.7f, 1.2f);
+        crate.getPersistentDataContainer().set(readyKey(), PersistentDataType.LONG, now + LOCK_MS);   // one packet / 30 min
+        p.getPersistentDataContainer().set(lockKey(), PersistentDataType.LONG, now + LOCK_MS);        // one per player / 30 min
+        p.playSound(p.getLocation(), Sound.ITEM_BUNDLE_REMOVE_ONE, 0.7f, 1.3f);
         ActionBars.message(p, line("You take a gum packet.", NamedTextColor.LIGHT_PURPLE));
+        event.getInventory().setItem(PACKET_SLOT, restockingIcon(LOCK_MS));
+    }
+
+    private void deny(Player p, String msg) {
+        ActionBars.message(p, line(msg, NamedTextColor.RED));
+        p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, 0.7f, 0.7f);
+    }
+
+    private long mins(long ms) { return ms / 60000L + 1; }
+
+    private ItemStack restockingIcon(long remainMs) {
+        return named(Material.CLOCK, "Restocking… " + mins(remainMs) + " min");
+    }
+
+    private ItemStack named(Material mat, String name) {
+        ItemStack it = new ItemStack(mat);
+        ItemMeta meta = it.getItemMeta();
+        meta.itemName(Component.text(name, NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
+        it.setItemMeta(meta);
+        return it;
     }
 
     /** Break the placed crate to reclaim the crate item. */
@@ -154,6 +208,11 @@ public final class Scp1079Listener implements Listener {
     private boolean hasPacket(Player p) {
         for (ItemStack it : p.getInventory().getContents()) if (registry.isScp1079Packet(it)) return true;
         return false;
+    }
+
+    /** Marks an inventory as a specific crate's dispenser window. */
+    private record CrateHolder(UUID crate) implements InventoryHolder {
+        @Override public Inventory getInventory() { return null; }
     }
 
     private Component line(String text, NamedTextColor color) {

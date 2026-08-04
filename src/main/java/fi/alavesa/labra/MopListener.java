@@ -51,16 +51,27 @@ public final class MopListener implements Listener {
             where = target != null ? target.getLocation().add(0.5, 1.0, 0.5) : p.getLocation();
         }
 
-        int cleared = body.cleanNear(where, radius());
+        // One BRUSH STROKE per click - it takes several to scrub a puddle away, not one instant wipe.
+        int status = body.brushStroke(where, radius());
         p.swingMainHand();
-        if (cleared > 0) {
-            p.getWorld().playSound(where, "scp:mop", 0.9f, 1.0f);
-            p.getWorld().spawnParticle(Particle.SPLASH, where, 20, 0.6, 0.1, 0.6, 0.0);
-            p.getWorld().spawnParticle(Particle.ITEM_SLIME, where, 8, 0.5, 0.05, 0.5, 0.0);
-            ActionBars.message(p, line("You mop up the SCP-1079 mess.", NamedTextColor.WHITE));
-        } else {
-            p.getWorld().playSound(where, "scp:mop", 0.5f, 1.2f);
-            ActionBars.message(p, line("Nothing to mop up here.", NamedTextColor.GRAY));
+        switch (status) {
+            case 2 -> {   // that stroke finished it off
+                p.getWorld().playSound(where, org.bukkit.Sound.ITEM_BRUSH_BRUSHING_GRAVEL_COMPLETE, 0.9f, 1.1f);
+                p.getWorld().playSound(where, "scp:mop", 0.9f, 1.0f);
+                p.getWorld().spawnParticle(Particle.ITEM_SLIME, where, 10, 0.4, 0.05, 0.4, 0.0);
+                ActionBars.message(p, line("You scrub the last of it away.", NamedTextColor.WHITE));
+            }
+            case 1 -> {   // brushing it down, still some to go
+                p.getWorld().playSound(where, org.bukkit.Sound.ITEM_BRUSH_BRUSHING_GENERIC, 0.9f, 1.0f);
+                p.getWorld().playSound(where, "scp:mop", 0.7f, 1.0f);
+                p.getWorld().spawnParticle(Particle.ITEM_SLIME, where, 6, 0.4, 0.05, 0.4, 0.0);
+                p.getWorld().spawnParticle(Particle.DUST, where.clone().add(0, 0.2, 0), 6, 0.4, 0.15, 0.4, 0.0,
+                    new Particle.DustOptions(org.bukkit.Color.fromRGB(255, 105, 180), 1.4f));
+            }
+            default -> {  // nothing under the mop
+                p.getWorld().playSound(where, "scp:mop", 0.5f, 1.2f);
+                ActionBars.message(p, line("Nothing to mop up here.", NamedTextColor.GRAY));
+            }
         }
     }
 
