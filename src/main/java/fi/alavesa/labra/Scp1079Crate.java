@@ -91,22 +91,25 @@ public final class Scp1079Crate implements Listener {
         long now = System.currentTimeMillis();
         ItemDisplay display = at.getWorld().spawn(at, ItemDisplay.class, d -> {
             d.setItemStack(registry.buildScp1079Crate());
-            d.setTransformation(new Transformation(new Vector3f(0, 0.15f, 0), new AxisAngle4f(0, 0, 0, 1),
-                new Vector3f(0.7f, 0.7f, 0.7f), new AxisAngle4f(0, 0, 0, 1)));   // sits inside the cube
+            d.setTransformation(new Transformation(new Vector3f(0, 0f, 0), new AxisAngle4f(0, 0, 0, 1),
+                new Vector3f(1.0f, 1.0f, 1.0f), new AxisAngle4f(0, 0, 0, 1)));   // full cube in place of the hidden body
             d.setTeleportDuration(2);
             d.setPersistent(true);
             d.addScoreboardTag(MODEL_TAG);
         });
         Entity e = at.getWorld().spawnEntity(at, cubeType());
-        e.setSilent(true);
+        // Keep it a REAL sulfur cube (natural push + its own hit sound). Only: hide the native model,
+        // switch off the brain (no wandering, never primes its fuse), and make it unkillable via huge
+        // health that we heal back each tick - so hitting it still plays the sulfur-cube sound.
+        e.setInvisible(true);                 // native cube hidden; the custom model shows in its place
         e.setPersistent(true);
         e.addScoreboardTag(TAG);
-        if (e instanceof Slime s) s.setSize(2);                 // ~1-block cube
-        if (e instanceof Mob m) { m.setAware(false); m.setRemoveWhenFarAway(false); }   // no wander, no fuse-priming
+        if (e instanceof Slime s) s.setSize(2);
+        if (e instanceof Mob m) { m.setAware(false); m.setRemoveWhenFarAway(false); }
         if (e instanceof LivingEntity le) {
-            le.setCollidable(true);                             // players bump + shove it
-            setAttr(le, Attribute.KNOCKBACK_RESISTANCE, 1.0);  // heavy - a punch barely moves it
-            setAttr(le, Attribute.MOVEMENT_SPEED, 0.0);        // never propels itself
+            le.setCollidable(true);           // players bump + shove it around naturally
+            setAttr(le, Attribute.MAX_HEALTH, 400.0);
+            le.setHealth(400.0);
         }
         var pdc = e.getPersistentDataContainer();
         pdc.set(packetsKey(), PersistentDataType.INTEGER, packets);
@@ -131,7 +134,12 @@ public final class Scp1079Crate implements Listener {
         return e instanceof ItemDisplay d ? d : null;
     }
 
-    private Location modelPoint(Entity body) { return body.getLocation().add(0, 0.1, 0); }
+    private Location modelPoint(Entity body) { return body.getLocation(); }
+
+    private boolean hasPacket(Player p) {
+        for (var it : p.getInventory().getContents()) if (registry.isScp1079Packet(it)) return true;
+        return false;
+    }
 
     private void touch(Entity body) {
         body.getPersistentDataContainer().set(touchedKey(), PersistentDataType.LONG, System.currentTimeMillis());
@@ -193,6 +201,11 @@ public final class Scp1079Crate implements Listener {
         if (crate == null || !isCrate(crate)) { p.closeInventory(); return; }
         int count = accrue(crate);
         if (count <= 0) return;
+        if (hasPacket(p)) {   // one packet per person - can't take another while you already carry one
+            ActionBars.message(p, line("You can only carry one gum packet.", NamedTextColor.RED));
+            p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, 0.7f, 0.7f);
+            return;
+        }
         if (p.getInventory().firstEmpty() == -1) {
             ActionBars.message(p, line("No room for a packet.", NamedTextColor.RED));
             p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, 0.7f, 0.7f);
@@ -207,30 +220,29 @@ public final class Scp1079Crate implements Listener {
         ActionBars.message(p, line("You take a gum packet.", NamedTextColor.LIGHT_PURPLE));
     }
 
-    /** Punching the crate never breaks it - it just gives a small, heavy nudge (iron-block physics).
-     *  ONLY an op in creative can pick it up by punching; everyone else (survival ops included) can't. */
+    /** Punching lands for real - the sulfur cube plays its own hit sound and takes the knockback -
+     *  but it never breaks (it's healed back to full each tick). ONLY an op in CREATIVE picks it up by
+     *  punching; survival ops and everyone else just knock it around. */
     @EventHandler
     public void onCratePunch(EntityDamageByEntityEvent event) {
         Entity crate = event.getEntity();
         if (!isCrate(crate)) return;
-        event.setCancelled(true);   // no damage, no death, no vanilla knockback
-        if (!(event.getDamager() instanceof Player p)) return;
-        if (p.isOp() && p.getGameMode() == GameMode.CREATIVE) {
+        if (event.getDamager() instanceof Player p && p.isOp() && p.getGameMode() == GameMode.CREATIVE) {
+            event.setCancelled(true);
             Location loc = crate.getLocation();
             despawn(crate);
             p.getInventory().addItem(registry.buildScp1079Crate()).values().forEach(l -> p.getWorld().dropItemNaturally(loc, l));
             loc.getWorld().playSound(loc, Sound.BLOCK_WOOD_BREAK, 0.7f, 1.0f);
             return;
         }
-        Vector dir = crate.getLocation().toVector().subtract(p.getLocation().toVector()).setY(0);
-        if (dir.lengthSquared() > 0.01) crate.setVelocity(crate.getVelocity().add(dir.normalize().multiply(0.22)));
-        touch(crate);
+        touch(crate);   // let the hit through: real sulfur-cube sound + knockback; it can't die
     }
 
-    /** The crate can't be hurt or killed by anything (a sulfur cube would otherwise split/explode). */
+    /** Environmental damage (fire/void/fall) can't kill it either - only entity hits land (for the
+     *  sulfur-cube sound), and those never kill it because it's healed to full every tick. */
     @EventHandler
     public void onCrateHurt(EntityDamageEvent event) {
-        if (isCrate(event.getEntity())) event.setCancelled(true);
+        if (isCrate(event.getEntity()) && !(event instanceof EntityDamageByEntityEvent)) event.setCancelled(true);
     }
 
     // ------------------------------------------------------------------ follow + idle
@@ -240,9 +252,25 @@ public final class Scp1079Crate implements Listener {
             Entity crate = Bukkit.getEntity(id);
             if (crate == null || !crate.getScoreboardTags().contains(TAG)) continue;
             if (crate.isDead()) { crates.remove(id); continue; }
+            if (crate instanceof LivingEntity le) {   // unkillable: top the health back up
+                var mh = le.getAttribute(Attribute.MAX_HEALTH);
+                if (mh != null && le.getHealth() < mh.getValue() - 0.01) le.setHealth(mh.getValue());
+            }
+            // smooth push: gently shove it out from under any player pressed into it
+            boolean near = false;
+            for (Player pl : crate.getWorld().getNearbyPlayers(crate.getLocation(), 1.2)) {
+                near = true;
+                double dx = crate.getLocation().getX() - pl.getLocation().getX();
+                double dz = crate.getLocation().getZ() - pl.getLocation().getZ();
+                double d2 = dx * dx + dz * dz;
+                if (d2 > 0.0004 && d2 < 0.85 * 0.85) {
+                    double len = Math.sqrt(d2);
+                    crate.setVelocity(crate.getVelocity().add(new Vector(dx / len * 0.08, 0, dz / len * 0.08)));
+                }
+            }
+            if (near) touch(crate);
             ItemDisplay d = displayOf(crate);
             if (d != null) d.teleport(modelPoint(crate));
-            if (!crate.getWorld().getNearbyPlayers(crate.getLocation(), TOUCH_RADIUS).isEmpty()) touch(crate);
         }
     }
 
