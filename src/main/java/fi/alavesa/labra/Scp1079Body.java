@@ -55,7 +55,6 @@ public final class Scp1079Body implements Listener, Runnable {
     private static final double HEART = 2.0;
     private static final double MIN_HP = 1.0;      // chew damage floors here (half a heart, poison-style)
     private static final double MAX_BLISTER = 0.55; // hard cap on how big a blister can grow
-    private static final int MOP_STROKES = 4;       // brush strokes to fully clear a puddle
 
     private final LabraPlugin plugin;
     private final Map<UUID, Blisters> blisters = new ConcurrentHashMap<>();
@@ -264,9 +263,10 @@ public final class Scp1079Body implements Listener, Runnable {
         }
     }
 
-    /** One mop brush-stroke near a point: scrubs the nearest puddle down a little, and clears it once
-     *  it's been brushed enough. Returns 0 = nothing here, 1 = brushed (still some left), 2 = cleared. */
-    public int brushStroke(Location center, double radius) {
+    /** Keep brushing the nearest puddle near a point - called every couple of ticks while the mop is
+     *  HELD, so a steady hold scrubs it away gradually. Each call rubs off a blob or two. Returns
+     *  0 = nothing under the mop, 1 = still scrubbing, 2 = that call cleared the last of it. */
+    public int brushClean(Location center, double radius) {
         double r2 = radius * radius;
         synchronized (messes) {
             Mess best = null; double bestD = Double.MAX_VALUE;
@@ -276,18 +276,11 @@ public final class Scp1079Body implements Listener, Runnable {
                 if (d <= r2 && d < bestD) { bestD = d; best = m; }
             }
             if (best == null) return 0;
-            best.brushProgress++;
-            int remainingStrokes = Math.max(1, MOP_STROKES - best.brushProgress);
-            int keep = (int) Math.ceil(best.parts.size() * (remainingStrokes / (double) (remainingStrokes + 1)));
-            while (best.parts.size() > keep && !best.parts.isEmpty()) {   // scrub away a share of the blobs
+            for (int n = 0; n < 2 && !best.parts.isEmpty(); n++) {   // rub off a blob or two per tick
                 BlockDisplay d = best.parts.remove(best.parts.size() - 1);
                 if (d != null && !d.isDead()) d.remove();
             }
-            if (best.brushProgress >= MOP_STROKES || best.parts.isEmpty()) {
-                best.parts.forEach(d -> { if (d != null && !d.isDead()) d.remove(); });
-                messes.remove(best);
-                return 2;
-            }
+            if (best.parts.isEmpty()) { messes.remove(best); return 2; }
             return 1;
         }
     }
@@ -397,10 +390,10 @@ public final class Scp1079Body implements Listener, Runnable {
                 if (e.getScoreboardTags().contains(SPOT_TAG) || e.getScoreboardTags().contains(MESS_TAG)) e.remove();
     }
 
-    /** A floor puddle: mutable so the mop can scrub its blob count and progress down over strokes. */
+    /** A floor puddle: mutable so the mop can scrub its blobs away a few at a time. */
     private static final class Mess {
         final UUID world; final double x, y, z, radius; final long expireMs;
-        final List<BlockDisplay> parts; int brushProgress;
+        final List<BlockDisplay> parts;
         Mess(UUID world, double x, double y, double z, double radius, long expireMs, List<BlockDisplay> parts) {
             this.world = world; this.x = x; this.y = y; this.z = z; this.radius = radius;
             this.expireMs = expireMs; this.parts = parts;

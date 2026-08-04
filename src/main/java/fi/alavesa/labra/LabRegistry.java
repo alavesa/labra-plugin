@@ -1,5 +1,9 @@
 package fi.alavesa.labra;
 
+import io.papermc.paper.datacomponent.DataComponentTypes;
+import io.papermc.paper.datacomponent.item.Consumable;
+import io.papermc.paper.datacomponent.item.consumable.ItemUseAnimation;
+import net.kyori.adventure.key.Key;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
@@ -132,8 +136,7 @@ public final class LabRegistry {
         meta.itemName(Component.text("SCP-1079 Gum Packet", NamedTextColor.LIGHT_PURPLE).decoration(TextDecoration.ITALIC, false));
         meta.lore(List.of(
             Component.text("Right-click to take a gum.", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
-            Component.text((SCP1079_PACKET_GUMS - taken) + " / " + SCP1079_PACKET_GUMS + " gums left.", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false),
-            Component.text("You can only carry one packet.", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false)));
+            Component.text((SCP1079_PACKET_GUMS - taken) + " / " + SCP1079_PACKET_GUMS + " gums left.", NamedTextColor.DARK_GRAY).decoration(TextDecoration.ITALIC, false)));
         setModel(meta, "scp1079_packet");
         useCooldown(meta, "scp1079_packet", plugin.getConfig().getInt("scp1079.packet-cooldown-seconds", 2));
         meta.getPersistentDataContainer().set(packet1079Key, PersistentDataType.BYTE, (byte) 1);
@@ -157,11 +160,18 @@ public final class LabRegistry {
         ItemStack item = new ItemStack(Material.PAPER);
         ItemMeta meta = item.getItemMeta();
         meta.itemName(Component.text("SCP-1079 Chewing Gum", NamedTextColor.LIGHT_PURPLE).decoration(TextDecoration.ITALIC, false));
-        meta.lore(List.of(Component.text("Right-click to chew.", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false)));
+        meta.lore(List.of(Component.text("Hold right-click to eat.", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false)));
         setModel(meta, "scp1079_gum");
         useCooldown(meta, "scp1079_gum", 2f);   // 2s to chew again - the white icon sweep
         meta.getPersistentDataContainer().set(gum1079Key, PersistentDataType.BYTE, (byte) 1);
         item.setItemMeta(meta);
+        // Eaten like SCP-500: hold right-click to chew it (the eat animation), then it's consumed.
+        item.setData(DataComponentTypes.CONSUMABLE, Consumable.consumable()
+            .consumeSeconds(1.2f)
+            .animation(ItemUseAnimation.EAT)
+            .sound(Key.key("minecraft:entity.generic.eat"))
+            .hasConsumeParticles(false)
+            .build());
         return item;
     }
     public boolean isScp1079Gum(ItemStack i) {

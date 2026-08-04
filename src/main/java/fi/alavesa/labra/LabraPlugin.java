@@ -64,7 +64,7 @@ public final class LabraPlugin extends JavaPlugin {
         getServer().getScheduler().runTaskTimer(this, scp1079body, 40L, 1L);            // spots ride the body
         getServer().getScheduler().runTaskTimer(this, scp1079body::slowTick, 40L, 10L); // mess slows those who step in it
         getServer().getPluginManager().registerEvents(new Scp1079Listener(this, registry, scp1079body), this);
-        getServer().getPluginManager().registerEvents(new MopListener(this, registry, scp1079body), this);
+        getServer().getScheduler().runTaskTimer(this, new MopListener(this, registry, scp1079body), 40L, 2L);   // scrub-while-held
         getServer().getPluginManager().registerEvents(new SnackListener(registry), this);
         getServer().getScheduler().runTaskTimer(this, fire, 1200L, 1200L);   // fire housekeeping every minute
         getServer().getScheduler().runTaskTimer(this, fire::sprinklerTick, 40L, 10L);   // active sprinklers
