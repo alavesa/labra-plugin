@@ -67,7 +67,7 @@ public final class LabraPlugin extends JavaPlugin {
         scp1079crate = new Scp1079Crate(this, registry);
         getServer().getPluginManager().registerEvents(scp1079crate, this);
         getServer().getScheduler().runTask(this, scp1079crate::rescan);                      // find crates already placed
-        getServer().getScheduler().runTaskTimer(this, scp1079crate::physicsTick, 40L, 2L);   // pushable + gravity
+        getServer().getScheduler().runTaskTimer(this, scp1079crate::syncTick, 40L, 1L);       // glue the cube to its physics body
         getServer().getScheduler().runTaskTimer(this, scp1079crate::rescan, 100L, 100L);     // pick up chunk-loaded crates
         getServer().getScheduler().runTaskTimer(this, scp1079crate::idleTick, 200L, 200L);   // idle crates return home
         getServer().getPluginManager().registerEvents(new Scp1079Listener(this, registry, scp1079body, scp1079crate), this);
