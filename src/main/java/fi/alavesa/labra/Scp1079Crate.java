@@ -4,11 +4,18 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Bukkit;
+import org.bukkit.GameMode;
 import org.bukkit.Location;
+import org.bukkit.NamespacedKey;
+import org.bukkit.Registry;
 import org.bukkit.Sound;
 import org.bukkit.World;
+import org.bukkit.attribute.Attribute;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.EntityType;
 import org.bukkit.entity.ItemDisplay;
+import org.bukkit.entity.LivingEntity;
+import org.bukkit.entity.Mob;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Slime;
 import org.bukkit.event.EventHandler;
@@ -23,6 +30,7 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.util.Transformation;
+import org.bukkit.util.Vector;
 import org.joml.AxisAngle4f;
 import org.joml.Vector3f;
 
@@ -32,90 +40,110 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * The SCP-1079 crate is a REAL pushable object: an invisible {@link Slime} body (permanently invisible -
- * no potion, no particles - with its brain switched off but its physics kept, so Minecraft itself pushes
- * it, drops it with gravity, and stops it at walls) carrying a custom-modelled sulfur cube. Shove it out
- * of the containment chamber for delivery/theft quests. It's also a dispenser: a hopper window that grows
- * one gum packet every 30 minutes (up to five, no restock countdown). Left alone away from its placed
- * spot, it returns home.
+ * The SCP-1079 crate is a REAL 26.2 Sulfur Cube entity carrying the custom crate model. The sulfur
+ * cube gives it genuine cube physics - players PUSH it around and PUNCH it (heavy, iron-block-like: it
+ * barely budges, no big bounce). Its brain and fuse are off, so it never wanders or detonates, and it
+ * can't be hurt or killed. Only an op in CREATIVE can pick it up by punching it. It's also a dispenser:
+ * a hopper window that grows a gum packet every 30 min (starts with a few). Left alone away from its
+ * placed spot, it returns home.
  */
 public final class Scp1079Crate implements Listener {
 
-    private static final String TAG = "lab.scp1079crate";
+    private static final String TAG = "lab.scp1079crate";        // the sulfur-cube body
+    private static final String MODEL_TAG = "lab.scp1079model";  // the ItemDisplay riding inside it
     private static final int MAX_PACKETS = 5;
-    private static final long ACCRUE_MS = 30L * 60L * 1000L;   // one packet / 30 min
-    private static final double TOUCH_RADIUS = 2.6;            // a player this close counts as "using" it
+    private static final int START_PACKETS = 3;                  // a fresh crate holds more than one
+    private static final long ACCRUE_MS = 30L * 60L * 1000L;
+    private static final double TOUCH_RADIUS = 2.6;
 
     private final LabraPlugin plugin;
     private final LabRegistry registry;
-    private final Set<UUID> crates = new HashSet<>();   // tracked crate Slime ids (loaded ones)
+    private final Set<UUID> crates = new HashSet<>();
 
     Scp1079Crate(LabraPlugin plugin, LabRegistry registry) { this.plugin = plugin; this.registry = registry; }
 
-    private org.bukkit.NamespacedKey packetsKey() { return plugin.keyOf("scp1079_crate_packets"); }
-    private org.bukkit.NamespacedKey accrueKey()  { return plugin.keyOf("scp1079_crate_accrue"); }
-    private org.bukkit.NamespacedKey touchedKey() { return plugin.keyOf("scp1079_crate_touched"); }
-    private org.bukkit.NamespacedKey homeKey()    { return plugin.keyOf("scp1079_crate_home"); }
-    private org.bukkit.NamespacedKey displayKey() { return plugin.keyOf("scp1079_crate_display"); }
+    private NamespacedKey packetsKey() { return plugin.keyOf("scp1079_crate_packets"); }
+    private NamespacedKey accrueKey()  { return plugin.keyOf("scp1079_crate_accrue"); }
+    private NamespacedKey touchedKey() { return plugin.keyOf("scp1079_crate_touched"); }
+    private NamespacedKey homeKey()    { return plugin.keyOf("scp1079_crate_home"); }
+    private NamespacedKey displayKey() { return plugin.keyOf("scp1079_crate_display"); }
 
     private long idleMs() { return Math.max(1, plugin.getConfig().getInt("scp1079.crate-idle-minutes", 5)) * 60_000L; }
+
+    /** The real 26.2 sulfur cube type, or a magma cube as a fallback on an older server. */
+    private EntityType cubeType() {
+        EntityType t = Registry.ENTITY_TYPE.get(NamespacedKey.minecraft("sulfur_cube"));
+        return t != null ? t : EntityType.MAGMA_CUBE;
+    }
 
     // ------------------------------------------------------------------ placement
 
     public void place(Player p, Location at) {
         at = at.getBlock().getLocation().add(0.5, 0, 0.5);
-        spawn(at, 1, System.currentTimeMillis(), homeString(at));
+        spawn(at, START_PACKETS, System.currentTimeMillis(), homeString(at));
         if (registry.isScp1079Crate(p.getInventory().getItemInMainHand())) p.getInventory().getItemInMainHand().setAmount(0);
         else p.getInventory().getItemInOffHand().setAmount(0);
         at.getWorld().playSound(at, Sound.BLOCK_WOOD_PLACE, 0.7f, 1.0f);
     }
 
-    /** Spawn the invisible slime body + its sulfur-cube display, carrying packet count and home. */
-    private Slime spawn(Location at, int packets, long accrueSince, String home) {
+    /** Spawn the sulfur-cube body + the custom crate model riding inside it. */
+    private LivingEntity spawn(Location at, int packets, long accrueSince, String home) {
         long now = System.currentTimeMillis();
         ItemDisplay display = at.getWorld().spawn(at, ItemDisplay.class, d -> {
             d.setItemStack(registry.buildScp1079Crate());
-            d.setTransformation(new Transformation(new Vector3f(0, 0f, 0), new AxisAngle4f(0, 0, 0, 1),
-                new Vector3f(1.0f, 1.0f, 1.0f), new AxisAngle4f(0, 0, 0, 1)));
-            d.setTeleportDuration(2);   // follow the body smoothly as it's shoved around
+            d.setTransformation(new Transformation(new Vector3f(0, 0.15f, 0), new AxisAngle4f(0, 0, 0, 1),
+                new Vector3f(0.7f, 0.7f, 0.7f), new AxisAngle4f(0, 0, 0, 1)));   // sits inside the cube
+            d.setTeleportDuration(2);
             d.setPersistent(true);
-            d.addScoreboardTag(TAG);
+            d.addScoreboardTag(MODEL_TAG);
         });
-        Slime slime = at.getWorld().spawn(at, Slime.class, s -> {
-            s.setSize(2);                 // ~1-block cube hitbox
-            s.setAware(false);            // no brain: it won't wander, but physics (gravity + being pushed) stay on
-            s.setInvisible(true);         // permanent invisibility, no potion and NO particles
-            s.setSilent(true);
-            s.setCollidable(true);        // players bump into it and shove it
-            s.setPersistent(true);
-            s.setRemoveWhenFarAway(false);
-            s.addScoreboardTag(TAG);
-            var pdc = s.getPersistentDataContainer();
-            pdc.set(packetsKey(), PersistentDataType.INTEGER, packets);
-            pdc.set(accrueKey(), PersistentDataType.LONG, accrueSince);
-            pdc.set(touchedKey(), PersistentDataType.LONG, now);
-            pdc.set(homeKey(), PersistentDataType.STRING, home);
-            pdc.set(displayKey(), PersistentDataType.STRING, display.getUniqueId().toString());
-        });
-        display.teleport(slime.getLocation());
-        crates.add(slime.getUniqueId());
-        return slime;
+        Entity e = at.getWorld().spawnEntity(at, cubeType());
+        e.setSilent(true);
+        e.setPersistent(true);
+        e.addScoreboardTag(TAG);
+        if (e instanceof Slime s) s.setSize(2);                 // ~1-block cube
+        if (e instanceof Mob m) { m.setAware(false); m.setRemoveWhenFarAway(false); }   // no wander, no fuse-priming
+        if (e instanceof LivingEntity le) {
+            le.setCollidable(true);                             // players bump + shove it
+            setAttr(le, Attribute.KNOCKBACK_RESISTANCE, 1.0);  // heavy - a punch barely moves it
+            setAttr(le, Attribute.MOVEMENT_SPEED, 0.0);        // never propels itself
+        }
+        var pdc = e.getPersistentDataContainer();
+        pdc.set(packetsKey(), PersistentDataType.INTEGER, packets);
+        pdc.set(accrueKey(), PersistentDataType.LONG, accrueSince);
+        pdc.set(touchedKey(), PersistentDataType.LONG, now);
+        pdc.set(homeKey(), PersistentDataType.STRING, home);
+        pdc.set(displayKey(), PersistentDataType.STRING, display.getUniqueId().toString());
+        display.teleport(modelPoint(e));
+        crates.add(e.getUniqueId());
+        return (LivingEntity) e;
     }
 
-    private ItemDisplay displayOf(Slime slime) {
-        String id = slime.getPersistentDataContainer().get(displayKey(), PersistentDataType.STRING);
+    private void setAttr(LivingEntity le, Attribute a, double v) {
+        var inst = le.getAttribute(a);
+        if (inst != null) inst.setBaseValue(v);
+    }
+
+    private ItemDisplay displayOf(Entity body) {
+        String id = body.getPersistentDataContainer().get(displayKey(), PersistentDataType.STRING);
         if (id == null) return null;
         Entity e = Bukkit.getEntity(UUID.fromString(id));
         return e instanceof ItemDisplay d ? d : null;
     }
 
-    private void touch(Slime slime) {
-        slime.getPersistentDataContainer().set(touchedKey(), PersistentDataType.LONG, System.currentTimeMillis());
+    private Location modelPoint(Entity body) { return body.getLocation().add(0, 0.1, 0); }
+
+    private void touch(Entity body) {
+        body.getPersistentDataContainer().set(touchedKey(), PersistentDataType.LONG, System.currentTimeMillis());
+    }
+
+    private boolean isCrate(Entity e) {
+        return e instanceof LivingEntity && e.getScoreboardTags().contains(TAG);
     }
 
     // ------------------------------------------------------------------ packets
 
-    private int accrue(Slime crate) {
+    private int accrue(Entity crate) {
         var pdc = crate.getPersistentDataContainer();
         long now = System.currentTimeMillis();
         int count = pdc.getOrDefault(packetsKey(), PersistentDataType.INTEGER, 0);
@@ -136,7 +164,8 @@ public final class Scp1079Crate implements Listener {
 
     @EventHandler
     public void onCrateRightClick(PlayerInteractAtEntityEvent event) {
-        if (!(event.getRightClicked() instanceof Slime crate) || !crate.getScoreboardTags().contains(TAG)) return;
+        Entity crate = event.getRightClicked();
+        if (!isCrate(crate)) return;
         event.setCancelled(true);
         if (event.getHand() != EquipmentSlot.HAND) return;
         crates.add(crate.getUniqueId());
@@ -144,7 +173,7 @@ public final class Scp1079Crate implements Listener {
         open(event.getPlayer(), crate);
     }
 
-    private void open(Player p, Slime crate) {
+    private void open(Player p, Entity crate) {
         int count = accrue(crate);
         Inventory inv = Bukkit.createInventory(new CrateHolder(crate.getUniqueId()), InventoryType.HOPPER,
             Component.text("SCP-1079 Crate", NamedTextColor.LIGHT_PURPLE));
@@ -160,8 +189,8 @@ public final class Scp1079Crate implements Listener {
         int slot = event.getRawSlot();
         if (slot < 0 || slot >= MAX_PACKETS || !(event.getWhoClicked() instanceof Player p)) return;
         if (!registry.isScp1079Packet(event.getCurrentItem())) return;
-        Entity ent = Bukkit.getEntity(holder.crate());
-        if (!(ent instanceof Slime crate) || !crate.getScoreboardTags().contains(TAG)) { p.closeInventory(); return; }
+        Entity crate = Bukkit.getEntity(holder.crate());
+        if (crate == null || !isCrate(crate)) { p.closeInventory(); return; }
         int count = accrue(crate);
         if (count <= 0) return;
         if (p.getInventory().firstEmpty() == -1) {
@@ -178,51 +207,55 @@ public final class Scp1079Crate implements Listener {
         ActionBars.message(p, line("You take a gum packet.", NamedTextColor.LIGHT_PURPLE));
     }
 
-    /** Hitting the crate (the sulfur cube) reclaims it as an item. */
+    /** Punching the crate never breaks it - it just gives a small, heavy nudge (iron-block physics).
+     *  ONLY an op in creative can pick it up by punching; everyone else (survival ops included) can't. */
     @EventHandler
-    public void onCrateAttack(EntityDamageByEntityEvent event) {
-        if (!(event.getEntity() instanceof Slime crate) || !crate.getScoreboardTags().contains(TAG)) return;
-        event.setCancelled(true);
+    public void onCratePunch(EntityDamageByEntityEvent event) {
+        Entity crate = event.getEntity();
+        if (!isCrate(crate)) return;
+        event.setCancelled(true);   // no damage, no death, no vanilla knockback
         if (!(event.getDamager() instanceof Player p)) return;
-        Location loc = crate.getLocation();
-        despawn(crate);
-        p.getInventory().addItem(registry.buildScp1079Crate()).values().forEach(l -> p.getWorld().dropItemNaturally(loc, l));
-        loc.getWorld().playSound(loc, Sound.BLOCK_WOOD_BREAK, 0.7f, 1.0f);
+        if (p.isOp() && p.getGameMode() == GameMode.CREATIVE) {
+            Location loc = crate.getLocation();
+            despawn(crate);
+            p.getInventory().addItem(registry.buildScp1079Crate()).values().forEach(l -> p.getWorld().dropItemNaturally(loc, l));
+            loc.getWorld().playSound(loc, Sound.BLOCK_WOOD_BREAK, 0.7f, 1.0f);
+            return;
+        }
+        Vector dir = crate.getLocation().toVector().subtract(p.getLocation().toVector()).setY(0);
+        if (dir.lengthSquared() > 0.01) crate.setVelocity(crate.getVelocity().add(dir.normalize().multiply(0.22)));
+        touch(crate);
     }
 
-    /** The crate never takes real damage - it can't be killed (a slime would split), only reclaimed. */
+    /** The crate can't be hurt or killed by anything (a sulfur cube would otherwise split/explode). */
     @EventHandler
     public void onCrateHurt(EntityDamageEvent event) {
-        if (event.getEntity() instanceof Slime s && s.getScoreboardTags().contains(TAG)) event.setCancelled(true);
+        if (isCrate(event.getEntity())) event.setCancelled(true);
     }
 
     // ------------------------------------------------------------------ follow + idle
 
-    /** Every tick: glue each sulfur-cube display to its (physics-driven) slime body, and count a nearby
-     *  player as interaction so a crate someone is pushing/using doesn't try to return home under them. */
     public void syncTick() {
         for (UUID id : new ArrayList<>(crates)) {
-            Entity e = Bukkit.getEntity(id);
-            if (!(e instanceof Slime crate)) continue;
+            Entity crate = Bukkit.getEntity(id);
+            if (crate == null || !crate.getScoreboardTags().contains(TAG)) continue;
             if (crate.isDead()) { crates.remove(id); continue; }
             ItemDisplay d = displayOf(crate);
-            if (d != null) d.teleport(crate.getLocation());
+            if (d != null) d.teleport(modelPoint(crate));
             if (!crate.getWorld().getNearbyPlayers(crate.getLocation(), TOUCH_RADIUS).isEmpty()) touch(crate);
         }
     }
 
-    /** Every so often: a crate left alone away from home despawns and reappears at its placed spot. */
     public void idleTick() {
         long now = System.currentTimeMillis();
         for (UUID id : new ArrayList<>(crates)) {
-            Entity e = Bukkit.getEntity(id);
-            if (!(e instanceof Slime crate) || crate.isDead()) continue;
+            Entity crate = Bukkit.getEntity(id);
+            if (crate == null || crate.isDead() || !crate.getScoreboardTags().contains(TAG)) continue;
             var pdc = crate.getPersistentDataContainer();
             long touched = pdc.getOrDefault(touchedKey(), PersistentDataType.LONG, now);
             Location home = parseHome(pdc.get(homeKey(), PersistentDataType.STRING));
             if (home == null || now - touched < idleMs()) continue;
-            if (crate.getLocation().getWorld().equals(home.getWorld())
-                && crate.getLocation().distanceSquared(home) < 0.6) continue;   // already home
+            if (crate.getWorld().equals(home.getWorld()) && crate.getLocation().distanceSquared(home) < 0.6) continue;
             int packets = pdc.getOrDefault(packetsKey(), PersistentDataType.INTEGER, 0);
             long accrue = pdc.getOrDefault(accrueKey(), PersistentDataType.LONG, now);
             String homeStr = pdc.get(homeKey(), PersistentDataType.STRING);
@@ -234,7 +267,7 @@ public final class Scp1079Crate implements Listener {
         }
     }
 
-    private void despawn(Slime crate) {
+    private void despawn(Entity crate) {
         crates.remove(crate.getUniqueId());
         ItemDisplay d = displayOf(crate);
         if (d != null) d.remove();
@@ -246,7 +279,7 @@ public final class Scp1079Crate implements Listener {
     public void rescan() {
         for (World w : plugin.getServer().getWorlds())
             for (Entity e : w.getEntities())
-                if (e instanceof Slime && e.getScoreboardTags().contains(TAG)) crates.add(e.getUniqueId());
+                if (e instanceof Mob && e.getScoreboardTags().contains(TAG)) crates.add(e.getUniqueId());
     }
 
     public void shutdown() { crates.clear(); }
