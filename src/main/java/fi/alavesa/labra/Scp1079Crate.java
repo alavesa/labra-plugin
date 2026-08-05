@@ -91,7 +91,9 @@ public final class Scp1079Crate implements Listener {
         long now = System.currentTimeMillis();
         ItemDisplay display = at.getWorld().spawn(at, ItemDisplay.class, d -> {
             d.setItemStack(registry.buildScp1079Crate());
-            d.setTransformation(new Transformation(new Vector3f(0, 0f, 0), new AxisAngle4f(0, 0, 0, 1),
+            // Lift the cube half a block: an ItemDisplay renders a block model centred on the entity
+            // (the cube's middle at the feet), so without this its bottom half is buried underground.
+            d.setTransformation(new Transformation(new Vector3f(0, 0.5f, 0), new AxisAngle4f(0, 0, 0, 1),
                 new Vector3f(1.0f, 1.0f, 1.0f), new AxisAngle4f(0, 0, 0, 1)));   // full cube in place of the hidden body
             d.setTeleportDuration(2);
             d.setPersistent(true);
