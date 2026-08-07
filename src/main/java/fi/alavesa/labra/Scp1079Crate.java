@@ -109,7 +109,10 @@ public final class Scp1079Crate implements Listener {
         if (e instanceof Slime s) s.setSize(2);
         if (e instanceof Mob m) { m.setAware(false); m.setRemoveWhenFarAway(false); }
         if (e instanceof LivingEntity le) {
-            le.setCollidable(true);           // players bump + shove it around naturally
+            // NOT collidable: entity-entity collision shoved it sideways when you hit it off-centre.
+            // Instead you walk THROUGH it and it's pushed the way you're WALKING (see onPlayerPush).
+            // Block collision + gravity are unaffected, so it still sits on the floor and stops at walls.
+            le.setCollidable(false);
             setAttr(le, Attribute.MAX_HEALTH, 400.0);
             le.setHealth(400.0);
         }
@@ -258,21 +261,30 @@ public final class Scp1079Crate implements Listener {
                 var mh = le.getAttribute(Attribute.MAX_HEALTH);
                 if (mh != null && le.getHealth() < mh.getValue() - 0.01) le.setHealth(mh.getValue());
             }
-            // smooth push: gently shove it out from under any player pressed into it
-            boolean near = false;
-            for (Player pl : crate.getWorld().getNearbyPlayers(crate.getLocation(), 1.2)) {
-                near = true;
-                double dx = crate.getLocation().getX() - pl.getLocation().getX();
-                double dz = crate.getLocation().getZ() - pl.getLocation().getZ();
-                double d2 = dx * dx + dz * dz;
-                if (d2 > 0.0004 && d2 < 0.85 * 0.85) {
-                    double len = Math.sqrt(d2);
-                    crate.setVelocity(crate.getVelocity().add(new Vector(dx / len * 0.08, 0, dz / len * 0.08)));
-                }
-            }
-            if (near) touch(crate);
             ItemDisplay d = displayOf(crate);
             if (d != null) d.teleport(modelPoint(crate));
+        }
+    }
+
+    /** Push the crate the way the player is WALKING (not away from them), so walking into it shoves
+     *  it forward rather than kicking it to the side. Uses the player's per-tick movement delta. */
+    @EventHandler
+    public void onPlayerPush(org.bukkit.event.player.PlayerMoveEvent event) {
+        if (crates.isEmpty()) return;
+        Location from = event.getFrom(), to = event.getTo();
+        double mx = to.getX() - from.getX(), mz = to.getZ() - from.getZ();
+        double moveLen = Math.sqrt(mx * mx + mz * mz);
+        if (moveLen < 0.02) return;   // basically standing still
+        Player p = event.getPlayer();
+        for (Entity crate : to.getWorld().getNearbyEntities(to, 1.1, 1.3, 1.1)) {
+            if (!isCrate(crate)) continue;
+            double dx = crate.getLocation().getX() - to.getX(), dz = crate.getLocation().getZ() - to.getZ();
+            double dist = Math.sqrt(dx * dx + dz * dz);
+            if (dist > 1.05) continue;
+            if (mx * dx + mz * dz <= 0) continue;   // only when walking TOWARD it
+            double push = Math.min(0.32, moveLen * 6.0);   // scale with walk speed, capped
+            crate.setVelocity(crate.getVelocity().add(new Vector(mx / moveLen * push, 0, mz / moveLen * push)));
+            touch(crate);
         }
     }
 
