@@ -30,6 +30,7 @@ public final class LabraPlugin extends JavaPlugin {
     private Scp018Listener scp018;
     private Scp1079Body scp1079body;
     private Scp1079Crate scp1079crate;
+    private PlayerRig playerRig;
     private FireManager fire;
 
     @Override
@@ -71,6 +72,10 @@ public final class LabraPlugin extends JavaPlugin {
         getServer().getScheduler().runTaskTimer(this, scp1079crate::rescan, 100L, 100L);     // pick up chunk-loaded crates
         getServer().getScheduler().runTaskTimer(this, scp1079crate::idleTick, 200L, 200L);   // idle crates return home
         getServer().getPluginManager().registerEvents(new Scp1079Listener(this, registry, scp1079body, scp1079crate), this);
+        playerRig = new PlayerRig(this);
+        getServer().getPluginManager().registerEvents(playerRig, this);
+        getServer().getScheduler().runTask(this, playerRig::sweepOrphans);
+        getServer().getScheduler().runTaskTimer(this, playerRig, 40L, 1L);   // puppeteer rig parts every frame
         getServer().getScheduler().runTaskTimer(this, new MopListener(this, registry, scp1079body), 40L, 2L);   // scrub-while-held
         getServer().getPluginManager().registerEvents(new SnackListener(registry), this);
         getServer().getScheduler().runTaskTimer(this, fire, 1200L, 1200L);   // fire housekeeping every minute
@@ -130,6 +135,7 @@ public final class LabraPlugin extends JavaPlugin {
         if (scp018 != null) scp018.shutdown();
         if (scp1079body != null) scp1079body.shutdown();
         if (scp1079crate != null) scp1079crate.shutdown();
+        if (playerRig != null) playerRig.shutdown();
     }
 
     /** /credits - check or move the credit balance. */
@@ -476,6 +482,16 @@ public final class LabraPlugin extends JavaPlugin {
                     labMenu.open(player, 0);
                     return true;
                 }
+                case "rig" -> {
+                    // /lab rig [player] - toggle the display-entity player rig (invisible body + 6 parts)
+                    if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
+                    Player target = args.length >= 2 ? getServer().getPlayerExact(args[1])
+                        : (sender instanceof Player self ? self : null);
+                    if (target == null) return error(sender, "Player not found.");
+                    if (playerRig.hasRig(target)) { playerRig.despawn(target); return ok(sender, target.getName() + " rig OFF."); }
+                    playerRig.spawn(target);
+                    return ok(sender, target.getName() + " rig ON (6 display parts; models: rig_head/torso/arm_left/arm_right/leg_left/leg_right).");
+                }
                 case "fire" -> {
                     // /lab fire clear [radius]  -> put out every fire block around you (emergency cleanup)
                     if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
@@ -511,7 +527,7 @@ public final class LabraPlugin extends JavaPlugin {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         return switch (args.length) {
-            case 1 -> filter(Stream.of("give", "zone", "place", "extinguisher", "sprinkler", "removemachines", "admin", "scp1499", "hud", "menu", "fire", "reload"), args[0]);
+            case 1 -> filter(Stream.of("give", "zone", "place", "extinguisher", "sprinkler", "removemachines", "admin", "scp1499", "hud", "menu", "rig", "fire", "reload"), args[0]);
             case 2 -> switch (args[0].toLowerCase()) {
                 case "hud" -> filter(Stream.concat(Stream.of("credits", "meters"),
                     getServer().getOnlinePlayers().stream().map(Player::getName)), args[1]);
