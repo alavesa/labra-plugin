@@ -14,6 +14,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.inventory.meta.SkullMeta;
 import org.bukkit.inventory.meta.components.CustomModelDataComponent;
 import org.bukkit.util.Transformation;
 import org.joml.AxisAngle4f;
@@ -54,11 +55,6 @@ public final class PlayerRig implements Listener, Runnable {
         Location last;       // previous location, to measure walk speed
     }
 
-    private Material baseItem() {
-        try { return Material.valueOf(plugin.getConfig().getString("rig.base-item", "LEATHER_HORSE_ARMOR")); }
-        catch (IllegalArgumentException e) { return Material.LEATHER_HORSE_ARMOR; }
-    }
-
     public boolean hasRig(Player p) { return rigs.containsKey(p.getUniqueId()); }
 
     /** Turn a player into a puppet: invisible body + six display parts riding it. */
@@ -67,7 +63,7 @@ public final class PlayerRig implements Listener, Runnable {
         p.setInvisible(true);
         Rig r = new Rig();
         r.last = p.getLocation();
-        for (String part : PARTS) r.parts.put(part, spawnPart(p.getLocation(), part));
+        for (String part : PARTS) r.parts.put(part, spawnPart(p, p.getLocation(), part));
         rigs.put(p.getUniqueId(), r);
         pose(p, r);
     }
@@ -78,22 +74,36 @@ public final class PlayerRig implements Listener, Runnable {
         if (p.isOnline()) p.setInvisible(false);
     }
 
-    private ItemDisplay spawnPart(Location at, String part) {
-        ItemStack model = new ItemStack(baseItem());
-        ItemMeta meta = model.getItemMeta();
-        CustomModelDataComponent cmd = meta.getCustomModelDataComponent();
+    /** Each part is a PLAYER_HEAD (head entity) carrying the PLAYER'S OWN SKIN, so the rig shows the
+     *  real player. A custom head model (custom_model_data rig_&lt;part&gt;) can reshape each head into
+     *  a body part; without one it renders the vanilla skinned head. */
+    private ItemDisplay spawnPart(Player owner, Location at, String part) {
+        ItemStack head = new ItemStack(Material.PLAYER_HEAD);
+        ItemMeta m = head.getItemMeta();
+        if (m instanceof SkullMeta skull) skull.setOwningPlayer(owner);   // the player's skin
+        CustomModelDataComponent cmd = m.getCustomModelDataComponent();
         cmd.setStrings(List.of("rig_" + part));
-        meta.setCustomModelDataComponent(cmd);
-        model.setItemMeta(meta);
+        m.setCustomModelDataComponent(cmd);
+        head.setItemMeta(m);
         return at.getWorld().spawn(at, ItemDisplay.class, d -> {
-            d.setItemStack(model);
-            d.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.FIXED);
+            d.setItemStack(head);
+            d.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.HEAD);
             d.setBrightness(new Display.Brightness(15, 15));
             d.setTeleportDuration(1);          // 1-tick interpolation = smooth follow, no client mod
             d.setInterpolationDuration(1);
             d.setPersistent(false);
             d.addScoreboardTag(TAG);
         });
+    }
+
+    /** Rough head-cube proportions per body part (a real Blockbench head-model replaces this look). */
+    private static Vector3f scale(String part) {
+        return switch (part) {
+            case "head"      -> new Vector3f(1.0f, 1.0f, 1.0f);
+            case "torso"     -> new Vector3f(1.0f, 1.5f, 0.55f);
+            case "arm_left", "arm_right" -> new Vector3f(0.5f, 1.5f, 0.5f);
+            default          -> new Vector3f(0.5f, 1.6f, 0.5f);   // legs
+        };
     }
 
     // ---------------------------------------------------------------- per-tick posing
@@ -155,7 +165,7 @@ public final class PlayerRig implements Listener, Runnable {
             d.setInterpolationDuration(1);
             d.setTransformation(new Transformation(
                 new Vector3f(0, 0, 0), new AxisAngle4f(limb, 1, 0, 0),
-                new Vector3f(1, 1, 1), new AxisAngle4f(0, 0, 0, 1)));
+                scale(part), new AxisAngle4f(0, 0, 0, 1)));
         }
     }
 
