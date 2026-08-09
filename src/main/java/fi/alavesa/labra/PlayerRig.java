@@ -65,14 +65,13 @@ public final class PlayerRig implements Listener, Runnable {
     private final Map<String, Tune> tunes = new java.util.HashMap<>();
 
     /** Animation attributes tunable with /lab riganim - so playback speeds can be dialled in-game. */
-    static final String[] ANIM_ATTRS = {"walk-speed", "walk-amp", "stance-speed", "invert-arms", "invert-legs"};
+    static final String[] ANIM_ATTRS = {"walk-speed", "walk-amp", "stance-speed", "head-pivot", "invert-arms", "invert-legs"};
     private double animWalkSpeed = 0.5;   // walk cadence multiplier (lower = slower stride)
     private double animWalkAmp = 0.9;     // walk swing amplitude
     private double animStance = 0.25;     // blend speed for crouch / aim / equip transitions (0..1)
-    private boolean animInvertArms = true;   // flip arm rotation direction (blind default; toggle in-game)
-    private boolean animInvertLegs = false;  // flip leg rotation direction
-    /** Approx height of the head cube's centre above the display origin, for in-place pitch rotation. */
-    private static final float HEAD_PIVOT_Y = 0.25f;
+    private double animHeadPivot = 0.25;  // head-cube centre height above origin (zero out the pitch offset)
+    private boolean animInvertArms = false;  // flip only the WALK swing of the arms (aim is always forward)
+    private boolean animInvertLegs = false;  // flip the walk swing of the legs
 
     PlayerRig(LabraPlugin plugin) { this.plugin = plugin; loadTunes(); }
 
@@ -114,7 +113,8 @@ public final class PlayerRig implements Listener, Runnable {
         animWalkSpeed  = plugin.getConfig().getDouble("rig.anim.walk-speed", 0.5);
         animWalkAmp    = plugin.getConfig().getDouble("rig.anim.walk-amp", 0.9);
         animStance     = plugin.getConfig().getDouble("rig.anim.stance-speed", 0.25);
-        animInvertArms = plugin.getConfig().getBoolean("rig.anim.invert-arms", true);
+        animHeadPivot  = plugin.getConfig().getDouble("rig.anim.head-pivot", 0.25);
+        animInvertArms = plugin.getConfig().getBoolean("rig.anim.invert-arms", false);
         animInvertLegs = plugin.getConfig().getBoolean("rig.anim.invert-legs", false);
     }
 
@@ -131,6 +131,7 @@ public final class PlayerRig implements Listener, Runnable {
             case "walk-speed" -> animWalkSpeed = value;
             case "walk-amp" -> animWalkAmp = value;
             case "stance-speed" -> animStance = value;
+            case "head-pivot" -> animHeadPivot = value;
             case "invert-arms" -> animInvertArms = value != 0;
             case "invert-legs" -> animInvertLegs = value != 0;
             default -> { return false; }
@@ -150,8 +151,8 @@ public final class PlayerRig implements Listener, Runnable {
     }
 
     public String animStatus() {
-        return String.format("walk-speed=%.2f  walk-amp=%.2f  stance-speed=%.2f  invert-arms=%b  invert-legs=%b",
-            animWalkSpeed, animWalkAmp, animStance, animInvertArms, animInvertLegs);
+        return String.format("walk-speed=%.2f  walk-amp=%.2f  stance-speed=%.2f  head-pivot=%.2f  invert-arms=%b  invert-legs=%b",
+            animWalkSpeed, animWalkAmp, animStance, animHeadPivot, animInvertArms, animInvertLegs);
     }
 
     // ---------------------------------------------------------------- live fine-tuning (/lab rigtune)
@@ -362,8 +363,14 @@ public final class PlayerRig implements Listener, Runnable {
         boolean aiming = holdingGun(p);
         float pitchRad = (float) Math.toRadians(pitch);
         double crouchDrop = sneaking ? -0.28 : 0.0;
-        float aimAngle = -1.45f - pitchRad;              // arms raised forward, tracking look pitch
+        // Aim pose: arms rotate from hanging-down (0) to horizontal-forward (-90 deg), and track the
+        // look pitch so the hands rise when you look up and drop when you look down. This is derived
+        // from the rotation convention (about +X), so it points FORWARD and tracks correctly - no
+        // inversion needed. The invert toggle only flips the WALK swing phase, never the aim.
+        float aimAngle = (float) (-Math.PI / 2) + pitchRad;
         float legBend = sneaking ? 0.4f : 0f;            // knees fold when crouched
+        float armSwing = (float) swing * (animInvertArms ? -1f : 1f);
+        float legSwing = (float) swing * (animInvertLegs ? -1f : 1f);
 
         for (String part : PARTS) {
             ItemDisplay d = r.parts.get(part);
@@ -382,10 +389,10 @@ public final class PlayerRig implements Listener, Runnable {
             // look pitch is folded in here as an in-place rotation so it no longer slides forward/back.
             float target = switch (part) {
                 case "head"      -> (float) Math.toRadians(-pitch + tn.pitch);
-                case "arm_left"  -> aiming ? aimAngle : (float) swing;
-                case "arm_right" -> aiming ? aimAngle : (float) -swing;
-                case "leg_left"  -> (float) -swing + legBend;
-                case "leg_right" -> (float) swing + legBend;
+                case "arm_left"  -> aiming ? aimAngle : armSwing;
+                case "arm_right" -> aiming ? aimAngle : -armSwing;
+                case "leg_left"  -> -legSwing + legBend;
+                case "leg_right" -> legSwing + legBend;
                 case "torso"     -> sneaking ? 0.5f : 0f;
                 default          -> 0f;
             };
@@ -395,21 +402,17 @@ public final class PlayerRig implements Listener, Runnable {
             Float applied = r.limbApplied.get(part);
             if (applied == null || Math.abs(now - applied) > 0.001f || r.retransform) {
                 r.limbApplied.put(part, now);
-                // rotation direction is flippable in-game (arms/legs) since it can't be verified headless
-                float rot = now;
-                if ((part.equals("arm_left") || part.equals("arm_right")) && animInvertArms) rot = -rot;
-                if ((part.equals("leg_left") || part.equals("leg_right")) && animInvertLegs) rot = -rot;
                 Vector3f sc = scale(part).mul((float) tn.scale);
                 Vector3f trans = new Vector3f(0, 0, 0);
                 if (part.equals("head")) {   // rotate about the head-cube centre so it stays in place
-                    Quaternionf rq = new Quaternionf(new AxisAngle4f(rot, 1, 0, 0));
-                    Vector3f c = new Vector3f(0, HEAD_PIVOT_Y, 0);
+                    Quaternionf rq = new Quaternionf(new AxisAngle4f(now, 1, 0, 0));
+                    Vector3f c = new Vector3f(0, (float) animHeadPivot, 0);
                     trans = new Vector3f(c).sub(rq.transform(new Vector3f(c)));
                 }
                 d.setInterpolationDelay(0);
                 d.setInterpolationDuration(LERP);
                 d.setTransformation(new Transformation(
-                    trans, new AxisAngle4f(rot, 1, 0, 0),
+                    trans, new AxisAngle4f(now, 1, 0, 0),
                     sc, new AxisAngle4f(0, 0, 0, 1)));
             }
             r.limbNow.put(part, now);
@@ -424,8 +427,7 @@ public final class PlayerRig implements Listener, Runnable {
             String sig = gunSig(held);
             if (!sig.equals(r.gunSig)) { r.gun.setItemStack(held.clone()); r.gunSig = sig; }
 
-            float armAngle = r.limbNow.getOrDefault("arm_right", aimAngle);
-            if (animInvertArms) armAngle = -armAngle;   // follow the displayed (possibly flipped) arm
+            float armAngle = r.limbNow.getOrDefault("arm_right", aimAngle);   // aim is never inverted
             Tune ar = tunes.get("arm_right"), gt = tunes.get("gun");
             double armLen = 0.6;                                   // shoulder -> hand along the arm
             double localX = ar.x + gt.x;

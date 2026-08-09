@@ -522,7 +522,7 @@ public final class LabraPlugin extends JavaPlugin {
                     // /lab riganim <attr> <value>  |  show  |  reset  - tune walk/crouch/equip anim speeds
                     if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
                     if (args.length < 2) return error(sender,
-                        "/lab riganim <walk-speed|walk-amp|stance-speed|invert-arms|invert-legs> <value>  |  show  |  reset");
+                        "/lab riganim <walk-speed|walk-amp|stance-speed|head-pivot|invert-arms|invert-legs> <value>  |  show  |  reset");
                     String sub = args[1].toLowerCase();
                     if (sub.equals("show")) return ok(sender, playerRig.animStatus());
                     if (sub.equals("reset")) { playerRig.resetAnim(); return ok(sender, "Rig anim reset to defaults."); }
@@ -531,7 +531,7 @@ public final class LabraPlugin extends JavaPlugin {
                     try { value = Double.parseDouble(args[2]); }
                     catch (NumberFormatException e) { return error(sender, "Value must be a number (invert-* = 0 or 1)."); }
                     if (!playerRig.setAnim(sub, value))
-                        return error(sender, "Unknown attribute. Options: walk-speed walk-amp stance-speed invert-arms invert-legs.");
+                        return error(sender, "Unknown attribute. Options: walk-speed walk-amp stance-speed head-pivot invert-arms invert-legs.");
                     return ok(sender, "Set " + sub + " = " + args[2] + ". Live on the rig now.");
                 }
                 case "fire" -> {
