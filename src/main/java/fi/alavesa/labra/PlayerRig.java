@@ -57,10 +57,117 @@ public final class PlayerRig implements Listener, Runnable {
     private final LabraPlugin plugin;
     private final Map<UUID, Rig> rigs = new ConcurrentHashMap<>();
 
-    PlayerRig(LabraPlugin plugin) { this.plugin = plugin; }
+    /** Parts that can be fine-tuned live with /lab rigtune (head/torso/arms/legs + the gun display). */
+    static final String[] TUNABLE = {"head", "torso", "arms", "legs", "gun"};
+    static final String[] FIELDS = {"x", "y", "z", "yaw", "pitch", "scale"};
+    private final Map<String, Tune> tunes = new java.util.HashMap<>();
+
+    PlayerRig(LabraPlugin plugin) { this.plugin = plugin; loadTunes(); }
+
+    /** Per-part alignment: position offset (x=right, y=up, z=forward), yaw/pitch offset in degrees, and
+     *  a uniform scale multiplier. Adjusted in-game and saved to config so the rig lines up perfectly. */
+    static final class Tune { double x, y, z, yaw, pitch, scale = 1.0; }
+
+    /** Built-in defaults (also the /lab rigtune reset values). Head yaw 180 so the face points the way
+     *  the player faces (a player-head display otherwise renders facing backwards). */
+    private static Tune defaults(String part) {
+        Tune t = new Tune();
+        switch (part) {
+            case "head"  -> { t.y = 1.5;  t.yaw = 180; }
+            case "torso" -> { t.y = 1.1; }
+            case "arms"  -> { t.y = 1.4; }
+            case "legs"  -> { t.y = 0.75; }
+            case "gun"   -> { t.x = 0.32; t.y = 1.30; t.z = 0.40; }
+            default -> { }
+        }
+        return t;
+    }
+
+    private void loadTunes() {
+        tunes.clear();
+        for (String part : TUNABLE) {
+            Tune d = defaults(part);
+            String base = "rig.tune." + part + ".";
+            Tune t = new Tune();
+            t.x     = plugin.getConfig().getDouble(base + "x", d.x);
+            t.y     = plugin.getConfig().getDouble(base + "y", d.y);
+            t.z     = plugin.getConfig().getDouble(base + "z", d.z);
+            t.yaw   = plugin.getConfig().getDouble(base + "yaw", d.yaw);
+            t.pitch = plugin.getConfig().getDouble(base + "pitch", d.pitch);
+            t.scale = plugin.getConfig().getDouble(base + "scale", d.scale);
+            tunes.put(part, t);
+        }
+    }
+
+    // ---------------------------------------------------------------- live fine-tuning (/lab rigtune)
+
+    static boolean isTunablePart(String part) {
+        for (String x : TUNABLE) if (x.equals(part)) return true;
+        return false;
+    }
+    static boolean isField(String field) {
+        for (String x : FIELDS) if (x.equals(field)) return true;
+        return false;
+    }
+
+    /** Set one field of one part - absolute, or relative (nudge) when relative=true - then persist it
+     *  and apply it live to every active rig. Returns false for an unknown part/field. */
+    public boolean setTune(String part, String field, double value, boolean relative) {
+        if (!isTunablePart(part) || !isField(field)) return false;
+        Tune t = tunes.get(part);
+        double v = relative ? currentField(t, field) + value : value;
+        switch (field) {
+            case "x" -> t.x = v;
+            case "y" -> t.y = v;
+            case "z" -> t.z = v;
+            case "yaw" -> t.yaw = v;
+            case "pitch" -> t.pitch = v;
+            case "scale" -> t.scale = v;
+        }
+        plugin.getConfig().set("rig.tune." + part + "." + field, v);
+        plugin.saveConfig();
+        for (Rig r : rigs.values()) r.retransform = true;
+        return true;
+    }
+
+    /** Reset one part (or everything, when part is null/"all") to the built-in defaults. */
+    public void resetTune(String part) {
+        if (part == null || part.equals("all")) plugin.getConfig().set("rig.tune", null);
+        else if (isTunablePart(part)) plugin.getConfig().set("rig.tune." + part, null);
+        else return;
+        plugin.saveConfig();
+        loadTunes();
+        for (Rig r : rigs.values()) r.retransform = true;
+    }
+
+    private static double currentField(Tune t, String field) {
+        return switch (field) {
+            case "x" -> t.x;
+            case "y" -> t.y;
+            case "z" -> t.z;
+            case "yaw" -> t.yaw;
+            case "pitch" -> t.pitch;
+            default -> t.scale;
+        };
+    }
+
+    /** Current values for one part, or every part when part is null - one line each, for the command. */
+    public List<String> tuneStatus(String part) {
+        List<String> out = new java.util.ArrayList<>();
+        for (String pt : TUNABLE) {
+            if (part != null && !part.equals(pt)) continue;
+            Tune t = tunes.get(pt);
+            out.add(String.format("%-6s x=%.2f y=%.2f z=%.2f yaw=%.0f pitch=%.0f scale=%.2f",
+                pt, t.x, t.y, t.z, t.yaw, t.pitch, t.scale));
+        }
+        return out;
+    }
 
     private static final class Rig {
         final Map<String, ItemDisplay> parts = new java.util.HashMap<>();
+        final Map<String, Float> limbNow = new java.util.HashMap<>();      // eased limb angle per part
+        final Map<String, Float> limbApplied = new java.util.HashMap<>();  // last angle actually sent
+        boolean retransform;  // force a transform re-send next tick (after a tune change)
         ItemDisplay gun;     // the third-person "you're holding a gun" display (dual rendering)
         String gunSig;       // signature of the gun item currently shown, to avoid rebuilding each tick
         String prefix;       // the team model prefix the limbs were last built with
@@ -104,7 +211,7 @@ public final class PlayerRig implements Listener, Runnable {
             d.setItemStack(head);
             d.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.HEAD);
             d.setBrightness(new Display.Brightness(15, 15));
-            d.setTeleportDuration(1);          // 1-tick interpolation = smooth follow, no client mod
+            d.setTeleportDuration(2);          // 2-tick lerp = smooth follow while updating every tick
             d.setInterpolationDuration(1);
             d.setPersistent(false);
             d.addScoreboardTag(TAG);
@@ -160,15 +267,10 @@ public final class PlayerRig implements Listener, Runnable {
         }
     }
 
-    /** Local part anchors (x=right, y=up, z=forward) relative to the player's feet. Arms/legs centred. */
-    private static Vector3f anchor(String part) {
-        return switch (part) {
-            case "head"  -> new Vector3f(0f, 1.5f, 0f);
-            case "torso" -> new Vector3f(0f, 1.1f, 0f);
-            case "arms"  -> new Vector3f(0f, 1.4f, 0f);
-            default      -> new Vector3f(0f, 0.75f, 0f);   // legs
-        };
-    }
+    /** Interpolation window (ticks) for stance blends - long enough to look smooth, short enough to
+     *  feel responsive. The rig ticks every tick, so restarting this each tick low-pass-smooths motion. */
+    private static final int LERP = 3;
+    private static final float EASE = 0.25f;   // per-tick approach toward the target stance angle
 
     private void pose(Player p, Rig r) {
         Location base = p.getLocation();
@@ -199,8 +301,9 @@ public final class PlayerRig implements Listener, Runnable {
         double swing = Math.sin(r.phase) * r.swingAmt * 0.9;       // radians
 
         // STANCE STATES (third-person, seen by others): crouch drops + leans; a held gun raises the arms
-        // into an aim pose that tracks the look pitch. Finer per-bone walk/aim clips are authored in
-        // Blockbench; this is the live server fallback so the rig always moves.
+        // into an aim pose that tracks the look pitch. Each angle is EASED toward its target so poses
+        // blend instead of snapping (that was the twitch), and transforms are only re-sent when they
+        // actually change so a settled rig doesn't restart its interpolation every tick.
         boolean sneaking = p.isSneaking();
         boolean aiming = holdingGun(p);
         float pitchRad = (float) Math.toRadians(pitch);
@@ -209,52 +312,76 @@ public final class PlayerRig implements Listener, Runnable {
         for (String part : PARTS) {
             ItemDisplay d = r.parts.get(part);
             if (d == null || d.isDead()) continue;
-            Vector3f a = anchor(part);
-            double wx = a.x * cos - a.z * sin, wz = a.x * sin + a.z * cos;
-            Location loc = new Location(base.getWorld(), base.getX() + wx, base.getY() + a.y + crouchDrop, base.getZ() + wz);
-            loc.setYaw(yaw);
-            float limb = switch (part) {
-                case "arms"  -> aiming ? -1.45f + pitchRad : (float) swing * 0.4f;   // both arms as one
-                case "legs"  -> sneaking ? 0.4f : 0f;                                // crouch bend
-                case "torso" -> sneaking ? 0.5f : 0f;                                // crouch lean
-                default      -> 0f;                                                  // head
-            };
-            if (part.equals("head")) loc.setPitch(pitch);
+            Tune tn = tunes.get(part);
+
+            // position: tuned offset (x/z rotated by body yaw so left/right track the body)
+            double wx = tn.x * cos - tn.z * sin, wz = tn.x * sin + tn.z * cos;
+            Location loc = new Location(base.getWorld(), base.getX() + wx, base.getY() + tn.y + crouchDrop, base.getZ() + wz);
+            loc.setYaw(yaw + (float) tn.yaw);
+            if (part.equals("head")) loc.setPitch(pitch + (float) tn.pitch);
             d.teleport(loc);
-            d.setInterpolationDelay(0);
-            d.setInterpolationDuration(1);
-            d.setTransformation(new Transformation(
-                new Vector3f(0, 0, 0), new AxisAngle4f(limb, 1, 0, 0),
-                scale(part), new AxisAngle4f(0, 0, 0, 1)));
+
+            // stance angle, eased toward its target
+            float target = switch (part) {
+                case "arms"  -> aiming ? -1.45f + pitchRad : (float) swing * 0.4f;
+                case "legs"  -> sneaking ? 0.4f : 0f;
+                case "torso" -> sneaking ? 0.5f : 0f;
+                default      -> 0f;   // head
+            };
+            float now = r.limbNow.getOrDefault(part, target);
+            now += (target - now) * EASE;
+            if (Math.abs(target - now) < 0.002f) now = target;
+            Float applied = r.limbApplied.get(part);
+            if (applied == null || Math.abs(now - applied) > 0.001f || r.retransform) {
+                r.limbNow.put(part, now);
+                r.limbApplied.put(part, now);
+                Vector3f sc = scale(part).mul((float) tn.scale);
+                d.setInterpolationDelay(0);
+                d.setInterpolationDuration(LERP);
+                d.setTransformation(new Transformation(
+                    new Vector3f(0, 0, 0), new AxisAngle4f(now, 1, 0, 0),
+                    sc, new AxisAngle4f(0, 0, 0, 1)));
+            } else {
+                r.limbNow.put(part, now);
+            }
         }
 
-        // DUAL RENDERING: show the held gun on the rig's arms for third-person viewers.
+        // DUAL RENDERING: show the held gun on the rig's hand for third-person viewers.
         if (aiming) {
             ItemStack held = p.getInventory().getItemInMainHand();
-            if (r.gun == null || r.gun.isDead()) r.gun = spawnGun(base);
+            if (r.gun == null || r.gun.isDead()) { r.gun = spawnGun(base); r.gunSig = null; }
             String sig = gunSig(held);
-            if (!sig.equals(r.gunSig)) { r.gun.setItemStack(held.clone()); r.gunSig = sig; }
-            Vector3f h = new Vector3f(0.32f, 1.30f, 0.40f);   // right-hand hold point
-            double hx = h.x * cos - h.z * sin, hz = h.x * sin + h.z * cos;
-            Location gloc = new Location(base.getWorld(), base.getX() + hx, base.getY() + h.y + crouchDrop, base.getZ() + hz);
-            gloc.setYaw(yaw);
-            gloc.setPitch(pitch);
+            if (!sig.equals(r.gunSig)) {
+                r.gun.setItemStack(held.clone());
+                r.gunSig = sig;
+                Tune gt = tunes.get("gun");
+                r.gun.setTransformation(new Transformation(
+                    new Vector3f(0, 0, 0), new AxisAngle4f(0, 0, 0, 1),
+                    new Vector3f((float) gt.scale), new AxisAngle4f(0, 0, 0, 1)));
+            }
+            Tune gt = tunes.get("gun");
+            double hx = gt.x * cos - gt.z * sin, hz = gt.x * sin + gt.z * cos;
+            Location gloc = new Location(base.getWorld(), base.getX() + hx, base.getY() + gt.y + crouchDrop, base.getZ() + hz);
+            gloc.setYaw(yaw + (float) gt.yaw);
+            gloc.setPitch(pitch + (float) gt.pitch);
             r.gun.teleport(gloc);
             r.gun.setInterpolationDelay(0);
-            r.gun.setInterpolationDuration(1);
+            r.gun.setInterpolationDuration(LERP);
         } else if (r.gun != null) {
             r.gun.remove();
             r.gun = null;
             r.gunSig = null;
         }
+
+        r.retransform = false;
     }
 
     private ItemDisplay spawnGun(Location at) {
         return at.getWorld().spawn(at, ItemDisplay.class, d -> {
             d.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.THIRDPERSON_RIGHTHAND);
             d.setBrightness(new Display.Brightness(15, 15));
-            d.setTeleportDuration(1);
-            d.setInterpolationDuration(1);
+            d.setTeleportDuration(2);
+            d.setInterpolationDuration(2);
             d.setPersistent(false);
             d.addScoreboardTag(TAG);
         });

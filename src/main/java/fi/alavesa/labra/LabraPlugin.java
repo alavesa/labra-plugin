@@ -490,7 +490,33 @@ public final class LabraPlugin extends JavaPlugin {
                     if (target == null) return error(sender, "Player not found.");
                     if (playerRig.hasRig(target)) { playerRig.despawn(target); return ok(sender, target.getName() + " rig OFF."); }
                     playerRig.spawn(target);
-                    return ok(sender, target.getName() + " rig ON (6 display parts; models: rig_head/torso/arm_left/arm_right/leg_left/leg_right).");
+                    return ok(sender, target.getName() + " rig ON (4 parts: head=skin, torso/arms/legs=<prefix>_<part>). Align with /lab rigtune.");
+                }
+                case "rigtune" -> {
+                    // /lab rigtune <part> <field> <value|+delta>  |  show [part]  |  reset [part|all]
+                    if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
+                    if (args.length < 2) return error(sender,
+                        "/lab rigtune <head|torso|arms|legs|gun> <x|y|z|yaw|pitch|scale> <value | +/-delta>  |  show [part]  |  reset [part|all]");
+                    String sub = args[1].toLowerCase();
+                    if (sub.equals("show")) {
+                        String part = args.length >= 3 ? args[2].toLowerCase() : null;
+                        for (String line : playerRig.tuneStatus(part))
+                            sender.sendMessage(Component.text(line, NamedTextColor.AQUA));
+                        return true;
+                    }
+                    if (sub.equals("reset")) {
+                        playerRig.resetTune(args.length >= 3 ? args[2].toLowerCase() : "all");
+                        return ok(sender, "Rig tune reset" + (args.length >= 3 ? " for " + args[2] : "") + ".");
+                    }
+                    if (args.length < 4) return error(sender, "/lab rigtune <part> <field> <value | +/-delta>");
+                    String part = sub, field = args[2].toLowerCase(), raw = args[3];
+                    boolean relative = raw.startsWith("+") || raw.startsWith("-");
+                    double value;
+                    try { value = Double.parseDouble(raw); }
+                    catch (NumberFormatException e) { return error(sender, "Value must be a number (e.g. 1.5 or +0.1)."); }
+                    if (!playerRig.setTune(part, field, value, relative))
+                        return error(sender, "Unknown part/field. Parts: head torso arms legs gun. Fields: x y z yaw pitch scale.");
+                    return ok(sender, "Set " + part + "." + field + " = " + (relative ? "(nudged) " : "") + raw + ". Live on the rig now.");
                 }
                 case "fire" -> {
                     // /lab fire clear [radius]  -> put out every fire block around you (emergency cleanup)
@@ -527,8 +553,10 @@ public final class LabraPlugin extends JavaPlugin {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         return switch (args.length) {
-            case 1 -> filter(Stream.of("give", "zone", "place", "extinguisher", "sprinkler", "removemachines", "admin", "scp1499", "hud", "menu", "rig", "fire", "reload"), args[0]);
+            case 1 -> filter(Stream.of("give", "zone", "place", "extinguisher", "sprinkler", "removemachines", "admin", "scp1499", "hud", "menu", "rig", "rigtune", "fire", "reload"), args[0]);
             case 2 -> switch (args[0].toLowerCase()) {
+                case "rigtune" -> filter(Stream.concat(Stream.of("show", "reset"),
+                    Stream.of(PlayerRig.TUNABLE)), args[1]);
                 case "hud" -> filter(Stream.concat(Stream.of("credits", "meters"),
                     getServer().getOnlinePlayers().stream().map(Player::getName)), args[1]);
                 case "fire" -> filter(Stream.of("clear"), args[1]);
@@ -546,9 +574,11 @@ public final class LabraPlugin extends JavaPlugin {
                 case "sprinkler" -> filter(Stream.of("button", "select", "link", "remove"), args[1]);
                 default -> List.of();
             };
-            case 3 -> args[0].equalsIgnoreCase("zone")
-                && (args[1].equalsIgnoreCase("remove") || args[1].equalsIgnoreCase("alarm"))
-                ? filter(registry.zones().keySet().stream(), args[2]) : List.of();
+            case 3 -> args[0].equalsIgnoreCase("rigtune") && PlayerRig.isTunablePart(args[1].toLowerCase())
+                ? filter(Stream.of(PlayerRig.FIELDS), args[2])
+                : args[0].equalsIgnoreCase("zone")
+                    && (args[1].equalsIgnoreCase("remove") || args[1].equalsIgnoreCase("alarm"))
+                    ? filter(registry.zones().keySet().stream(), args[2]) : List.of();
             case 4 -> switch (args[0].equalsIgnoreCase("zone") ? args[1].toLowerCase() : "") {
                 case "add" -> filter(LabRegistry.ZONE_TYPES.stream(), args[3]);
                 case "alarm" -> filter(Stream.of("on", "off"), args[3]);
