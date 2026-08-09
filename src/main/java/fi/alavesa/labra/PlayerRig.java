@@ -59,13 +59,20 @@ public final class PlayerRig implements Listener, Runnable {
 
     public boolean hasRig(Player p) { return rigs.containsKey(p.getUniqueId()); }
 
-    /** Turn a player into a puppet: invisible body + six display parts riding it. */
+    /** Turn a player into a puppet: invisible body + six display parts riding it. The parts are also
+     *  hidden from the OWNER, so the player never sees their own rig clipping through their first-person
+     *  camera (the first-person arms+gun are drawn client-side from the held item model instead). Other
+     *  players see the full rig. */
     public void spawn(Player p) {
         if (rigs.containsKey(p.getUniqueId())) return;
         p.setInvisible(true);
         Rig r = new Rig();
         r.last = p.getLocation();
-        for (String part : PARTS) r.parts.put(part, spawnPart(p, p.getLocation(), part));
+        for (String part : PARTS) {
+            ItemDisplay d = spawnPart(p, p.getLocation(), part);
+            r.parts.put(part, d);
+            p.hideEntity(plugin, d);        // invisible to yourself; everyone else sees it
+        }
         rigs.put(p.getUniqueId(), r);
         pose(p, r);
     }
@@ -76,16 +83,21 @@ public final class PlayerRig implements Listener, Runnable {
         if (p.isOnline()) p.setInvisible(false);
     }
 
-    /** Each part is a PLAYER_HEAD (head entity) carrying the PLAYER'S OWN SKIN, so the rig shows the
-     *  real player. A custom head model (custom_model_data rig_&lt;part&gt;) can reshape each head into
-     *  a body part; without one it renders the vanilla skinned head. */
+    /** Every part is a PLAYER_HEAD (head entity), but ONLY the head carries the player's own skin and
+     *  so renders the real player-head model. The other five limbs are CUSTOM-TEXTURED head entities:
+     *  no player skin, just a custom_model_data rig_&lt;part&gt; that the resource pack maps to a
+     *  Blockbench-modelled, custom-textured body part. Until those models exist they show as a plain
+     *  head placeholder so you can still see the rig move. */
     private ItemDisplay spawnPart(Player owner, Location at, String part) {
         ItemStack head = new ItemStack(Material.PLAYER_HEAD);
         ItemMeta m = head.getItemMeta();
-        if (m instanceof SkullMeta skull) skull.setOwningPlayer(owner);   // the player's skin
-        CustomModelDataComponent cmd = m.getCustomModelDataComponent();
-        cmd.setStrings(List.of("rig_" + part));
-        m.setCustomModelDataComponent(cmd);
+        if (part.equals("head")) {
+            if (m instanceof SkullMeta skull) skull.setOwningPlayer(owner);   // real player skin - head only
+        } else {
+            CustomModelDataComponent cmd = m.getCustomModelDataComponent();   // custom-textured limb model
+            cmd.setStrings(List.of("rig_" + part));
+            m.setCustomModelDataComponent(cmd);
+        }
         head.setItemMeta(m);
         return at.getWorld().spawn(at, ItemDisplay.class, d -> {
             d.setItemStack(head);
