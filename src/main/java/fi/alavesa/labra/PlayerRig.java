@@ -65,11 +65,12 @@ public final class PlayerRig implements Listener, Runnable {
     private final Map<String, Tune> tunes = new java.util.HashMap<>();
 
     /** Animation attributes tunable with /lab riganim - so playback speeds can be dialled in-game. */
-    static final String[] ANIM_ATTRS = {"walk-speed", "walk-amp", "stance-speed", "head-pivot", "invert-arms", "invert-legs"};
+    static final String[] ANIM_ATTRS = {"walk-speed", "walk-amp", "stance-speed", "head-pivot", "head-pivot-z", "invert-arms", "invert-legs"};
     private double animWalkSpeed = 0.5;   // walk cadence multiplier (lower = slower stride)
     private double animWalkAmp = 0.9;     // walk swing amplitude
     private double animStance = 0.25;     // blend speed for crouch / aim / equip transitions (0..1)
-    private double animHeadPivot = 0.25;  // head-cube centre height above origin (zero out the pitch offset)
+    private double animHeadPivot = 0.25;  // head-cube centre HEIGHT above origin (pitch rotation pivot Y)
+    private double animHeadPivotZ = 0.0;  // head-cube centre FORWARD offset (pitch rotation pivot Z) - zeroes the forward slide
     private boolean animInvertArms = false;  // flip only the WALK swing of the arms (aim is always forward)
     private boolean animInvertLegs = false;  // flip the walk swing of the legs
 
@@ -114,6 +115,7 @@ public final class PlayerRig implements Listener, Runnable {
         animWalkAmp    = plugin.getConfig().getDouble("rig.anim.walk-amp", 0.9);
         animStance     = plugin.getConfig().getDouble("rig.anim.stance-speed", 0.25);
         animHeadPivot  = plugin.getConfig().getDouble("rig.anim.head-pivot", 0.25);
+        animHeadPivotZ = plugin.getConfig().getDouble("rig.anim.head-pivot-z", 0.0);
         animInvertArms = plugin.getConfig().getBoolean("rig.anim.invert-arms", false);
         animInvertLegs = plugin.getConfig().getBoolean("rig.anim.invert-legs", false);
     }
@@ -132,6 +134,7 @@ public final class PlayerRig implements Listener, Runnable {
             case "walk-amp" -> animWalkAmp = value;
             case "stance-speed" -> animStance = value;
             case "head-pivot" -> animHeadPivot = value;
+            case "head-pivot-z" -> animHeadPivotZ = value;
             case "invert-arms" -> animInvertArms = value != 0;
             case "invert-legs" -> animInvertLegs = value != 0;
             default -> { return false; }
@@ -151,8 +154,8 @@ public final class PlayerRig implements Listener, Runnable {
     }
 
     public String animStatus() {
-        return String.format("walk-speed=%.2f  walk-amp=%.2f  stance-speed=%.2f  head-pivot=%.2f  invert-arms=%b  invert-legs=%b",
-            animWalkSpeed, animWalkAmp, animStance, animHeadPivot, animInvertArms, animInvertLegs);
+        return String.format("walk-speed=%.2f  walk-amp=%.2f  stance-speed=%.2f  head-pivot=%.2f  head-pivot-z=%.2f  invert-arms=%b  invert-legs=%b",
+            animWalkSpeed, animWalkAmp, animStance, animHeadPivot, animHeadPivotZ, animInvertArms, animInvertLegs);
     }
 
     // ---------------------------------------------------------------- live fine-tuning (/lab rigtune)
@@ -406,7 +409,7 @@ public final class PlayerRig implements Listener, Runnable {
                 Vector3f trans = new Vector3f(0, 0, 0);
                 if (part.equals("head")) {   // rotate about the head-cube centre so it stays in place
                     Quaternionf rq = new Quaternionf(new AxisAngle4f(now, 1, 0, 0));
-                    Vector3f c = new Vector3f(0, (float) animHeadPivot, 0);
+                    Vector3f c = new Vector3f(0, (float) animHeadPivot, (float) animHeadPivotZ);
                     trans = new Vector3f(c).sub(rq.transform(new Vector3f(c)));
                 }
                 d.setInterpolationDelay(0);
