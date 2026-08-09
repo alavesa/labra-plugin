@@ -21,6 +21,7 @@ import org.bukkit.inventory.meta.SkullMeta;
 import org.bukkit.inventory.meta.components.CustomModelDataComponent;
 import org.bukkit.util.Transformation;
 import org.joml.AxisAngle4f;
+import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
 import java.util.List;
@@ -63,6 +64,16 @@ public final class PlayerRig implements Listener, Runnable {
     static final String[] FIELDS = {"x", "y", "z", "yaw", "pitch", "scale"};
     private final Map<String, Tune> tunes = new java.util.HashMap<>();
 
+    /** Animation attributes tunable with /lab riganim - so playback speeds can be dialled in-game. */
+    static final String[] ANIM_ATTRS = {"walk-speed", "walk-amp", "stance-speed", "invert-arms", "invert-legs"};
+    private double animWalkSpeed = 0.5;   // walk cadence multiplier (lower = slower stride)
+    private double animWalkAmp = 0.9;     // walk swing amplitude
+    private double animStance = 0.25;     // blend speed for crouch / aim / equip transitions (0..1)
+    private boolean animInvertArms = true;   // flip arm rotation direction (blind default; toggle in-game)
+    private boolean animInvertLegs = false;  // flip leg rotation direction
+    /** Approx height of the head cube's centre above the display origin, for in-place pitch rotation. */
+    private static final float HEAD_PIVOT_Y = 0.25f;
+
     PlayerRig(LabraPlugin plugin) { this.plugin = plugin; loadTunes(); }
 
     /** Per-part alignment: position offset (x=right, y=up, z=forward), yaw/pitch offset in degrees, and
@@ -100,6 +111,47 @@ public final class PlayerRig implements Listener, Runnable {
             t.scale = plugin.getConfig().getDouble(base + "scale", d.scale);
             tunes.put(part, t);
         }
+        animWalkSpeed  = plugin.getConfig().getDouble("rig.anim.walk-speed", 0.5);
+        animWalkAmp    = plugin.getConfig().getDouble("rig.anim.walk-amp", 0.9);
+        animStance     = plugin.getConfig().getDouble("rig.anim.stance-speed", 0.25);
+        animInvertArms = plugin.getConfig().getBoolean("rig.anim.invert-arms", true);
+        animInvertLegs = plugin.getConfig().getBoolean("rig.anim.invert-legs", false);
+    }
+
+    // ---- animation attributes (/lab riganim) ----
+
+    static boolean isAnimAttr(String a) {
+        for (String x : ANIM_ATTRS) if (x.equals(a)) return true;
+        return false;
+    }
+
+    /** Set a walk/stance animation attribute, persist it and apply live. invert-* take 0/1. */
+    public boolean setAnim(String attr, double value) {
+        switch (attr) {
+            case "walk-speed" -> animWalkSpeed = value;
+            case "walk-amp" -> animWalkAmp = value;
+            case "stance-speed" -> animStance = value;
+            case "invert-arms" -> animInvertArms = value != 0;
+            case "invert-legs" -> animInvertLegs = value != 0;
+            default -> { return false; }
+        }
+        plugin.getConfig().set("rig.anim." + attr,
+            attr.startsWith("invert") ? (value != 0) : value);
+        plugin.saveConfig();
+        for (Rig r : rigs.values()) r.retransform = true;
+        return true;
+    }
+
+    public void resetAnim() {
+        plugin.getConfig().set("rig.anim", null);
+        plugin.saveConfig();
+        loadTunes();
+        for (Rig r : rigs.values()) r.retransform = true;
+    }
+
+    public String animStatus() {
+        return String.format("walk-speed=%.2f  walk-amp=%.2f  stance-speed=%.2f  invert-arms=%b  invert-legs=%b",
+            animWalkSpeed, animWalkAmp, animStance, animInvertArms, animInvertLegs);
     }
 
     // ---------------------------------------------------------------- live fine-tuning (/lab rigtune)
@@ -273,7 +325,6 @@ public final class PlayerRig implements Listener, Runnable {
     /** Interpolation window (ticks) for stance blends - long enough to look smooth, short enough to
      *  feel responsive. The rig ticks every tick, so restarting this each tick low-pass-smooths motion. */
     private static final int LERP = 3;
-    private static final float EASE = 0.25f;   // per-tick approach toward the target stance angle
 
     private void pose(Player p, Rig r) {
         Location base = p.getLocation();
@@ -300,8 +351,8 @@ public final class PlayerRig implements Listener, Runnable {
         r.last = base.clone();
         double targetAmt = Math.min(1.0, speed * 8.0);
         r.swingAmt += (targetAmt - r.swingAmt) * 0.3;
-        if (r.swingAmt > 0.02) r.phase += 0.35 + speed * 4.0;
-        double swing = Math.sin(r.phase) * r.swingAmt * 0.9;       // radians
+        if (r.swingAmt > 0.02) r.phase += (0.35 + speed * 4.0) * animWalkSpeed;   // cadence (tunable)
+        double swing = Math.sin(r.phase) * r.swingAmt * animWalkAmp;              // radians (tunable amp)
 
         // STANCE STATES (third-person, seen by others): crouch drops + leans; a held gun raises the arms
         // into an aim pose that tracks the look pitch. Each angle is EASED toward its target so poses
@@ -323,35 +374,45 @@ public final class PlayerRig implements Listener, Runnable {
             double wx = tn.x * cos - tn.z * sin, wz = tn.x * sin + tn.z * cos;
             Location loc = new Location(base.getWorld(), base.getX() + wx, base.getY() + tn.y + crouchDrop, base.getZ() + wz);
             loc.setYaw(yaw + (float) tn.yaw);
-            if (part.equals("head")) loc.setPitch(-pitch + (float) tn.pitch);   // display pitch is inverted
+            if (part.equals("head")) loc.setPitch(0);   // head pitch is done IN the transform (no forward/back swing)
             d.teleport(loc);
 
             // stance angle, eased toward its target. Arms/legs swing in OPPOSITE phase per side so the
-            // walk reads as a proper stride; a held gun overrides the arms into the aim pose.
+            // walk reads as a proper stride; a held gun overrides the arms into the aim pose. The head's
+            // look pitch is folded in here as an in-place rotation so it no longer slides forward/back.
             float target = switch (part) {
+                case "head"      -> (float) Math.toRadians(-pitch + tn.pitch);
                 case "arm_left"  -> aiming ? aimAngle : (float) swing;
                 case "arm_right" -> aiming ? aimAngle : (float) -swing;
                 case "leg_left"  -> (float) -swing + legBend;
                 case "leg_right" -> (float) swing + legBend;
                 case "torso"     -> sneaking ? 0.5f : 0f;
-                default          -> 0f;   // head
+                default          -> 0f;
             };
             float now = r.limbNow.getOrDefault(part, target);
-            now += (target - now) * EASE;
+            now += (target - now) * (float) animStance;
             if (Math.abs(target - now) < 0.002f) now = target;
             Float applied = r.limbApplied.get(part);
             if (applied == null || Math.abs(now - applied) > 0.001f || r.retransform) {
-                r.limbNow.put(part, now);
                 r.limbApplied.put(part, now);
+                // rotation direction is flippable in-game (arms/legs) since it can't be verified headless
+                float rot = now;
+                if ((part.equals("arm_left") || part.equals("arm_right")) && animInvertArms) rot = -rot;
+                if ((part.equals("leg_left") || part.equals("leg_right")) && animInvertLegs) rot = -rot;
                 Vector3f sc = scale(part).mul((float) tn.scale);
+                Vector3f trans = new Vector3f(0, 0, 0);
+                if (part.equals("head")) {   // rotate about the head-cube centre so it stays in place
+                    Quaternionf rq = new Quaternionf(new AxisAngle4f(rot, 1, 0, 0));
+                    Vector3f c = new Vector3f(0, HEAD_PIVOT_Y, 0);
+                    trans = new Vector3f(c).sub(rq.transform(new Vector3f(c)));
+                }
                 d.setInterpolationDelay(0);
                 d.setInterpolationDuration(LERP);
                 d.setTransformation(new Transformation(
-                    new Vector3f(0, 0, 0), new AxisAngle4f(now, 1, 0, 0),
+                    trans, new AxisAngle4f(rot, 1, 0, 0),
                     sc, new AxisAngle4f(0, 0, 0, 1)));
-            } else {
-                r.limbNow.put(part, now);
             }
+            r.limbNow.put(part, now);
         }
 
         // DUAL RENDERING: the gun rides the RIGHT HAND. Its position is derived from the right arm's
@@ -364,6 +425,7 @@ public final class PlayerRig implements Listener, Runnable {
             if (!sig.equals(r.gunSig)) { r.gun.setItemStack(held.clone()); r.gunSig = sig; }
 
             float armAngle = r.limbNow.getOrDefault("arm_right", aimAngle);
+            if (animInvertArms) armAngle = -armAngle;   // follow the displayed (possibly flipped) arm
             Tune ar = tunes.get("arm_right"), gt = tunes.get("gun");
             double armLen = 0.6;                                   // shoulder -> hand along the arm
             double localX = ar.x + gt.x;

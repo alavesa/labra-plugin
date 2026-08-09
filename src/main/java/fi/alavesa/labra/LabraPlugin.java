@@ -518,6 +518,22 @@ public final class LabraPlugin extends JavaPlugin {
                         return error(sender, "Unknown part/field. Parts: head torso arms legs gun. Fields: x y z yaw pitch scale.");
                     return ok(sender, "Set " + part + "." + field + " = " + (relative ? "(nudged) " : "") + raw + ". Live on the rig now.");
                 }
+                case "riganim" -> {
+                    // /lab riganim <attr> <value>  |  show  |  reset  - tune walk/crouch/equip anim speeds
+                    if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
+                    if (args.length < 2) return error(sender,
+                        "/lab riganim <walk-speed|walk-amp|stance-speed|invert-arms|invert-legs> <value>  |  show  |  reset");
+                    String sub = args[1].toLowerCase();
+                    if (sub.equals("show")) return ok(sender, playerRig.animStatus());
+                    if (sub.equals("reset")) { playerRig.resetAnim(); return ok(sender, "Rig anim reset to defaults."); }
+                    if (args.length < 3) return error(sender, "/lab riganim <attr> <value>  (invert-* take 0 or 1)");
+                    double value;
+                    try { value = Double.parseDouble(args[2]); }
+                    catch (NumberFormatException e) { return error(sender, "Value must be a number (invert-* = 0 or 1)."); }
+                    if (!playerRig.setAnim(sub, value))
+                        return error(sender, "Unknown attribute. Options: walk-speed walk-amp stance-speed invert-arms invert-legs.");
+                    return ok(sender, "Set " + sub + " = " + args[2] + ". Live on the rig now.");
+                }
                 case "fire" -> {
                     // /lab fire clear [radius]  -> put out every fire block around you (emergency cleanup)
                     if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
@@ -553,10 +569,12 @@ public final class LabraPlugin extends JavaPlugin {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         return switch (args.length) {
-            case 1 -> filter(Stream.of("give", "zone", "place", "extinguisher", "sprinkler", "removemachines", "admin", "scp1499", "hud", "menu", "rig", "rigtune", "fire", "reload"), args[0]);
+            case 1 -> filter(Stream.of("give", "zone", "place", "extinguisher", "sprinkler", "removemachines", "admin", "scp1499", "hud", "menu", "rig", "rigtune", "riganim", "fire", "reload"), args[0]);
             case 2 -> switch (args[0].toLowerCase()) {
                 case "rigtune" -> filter(Stream.concat(Stream.of("show", "reset"),
                     Stream.of(PlayerRig.TUNABLE)), args[1]);
+                case "riganim" -> filter(Stream.concat(Stream.of("show", "reset"),
+                    Stream.of(PlayerRig.ANIM_ATTRS)), args[1]);
                 case "hud" -> filter(Stream.concat(Stream.of("credits", "meters"),
                     getServer().getOnlinePlayers().stream().map(Player::getName)), args[1]);
                 case "fire" -> filter(Stream.of("clear"), args[1]);
