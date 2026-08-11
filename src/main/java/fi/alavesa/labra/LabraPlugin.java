@@ -31,6 +31,7 @@ public final class LabraPlugin extends JavaPlugin {
     private Scp1079Body scp1079body;
     private Scp1079Crate scp1079crate;
     private PlayerRig playerRig;
+    private BmRig bmRig;
     private FireManager fire;
 
     @Override
@@ -76,6 +77,9 @@ public final class LabraPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(playerRig, this);
         getServer().getScheduler().runTask(this, playerRig::sweepOrphans);
         getServer().getScheduler().runTaskTimer(this, playerRig, 40L, 1L);   // puppeteer rig parts every frame
+        bmRig = new BmRig(this);   // BetterModel third-person rig (soft-depend; opt-in via /lab bmrig)
+        getServer().getPluginManager().registerEvents(bmRig, this);
+        getServer().getScheduler().runTaskTimer(this, bmRig, 40L, 1L);   // locomotion state each tick
         getServer().getScheduler().runTaskTimer(this, new MopListener(this, registry, scp1079body), 40L, 2L);   // scrub-while-held
         getServer().getPluginManager().registerEvents(new SnackListener(registry), this);
         getServer().getScheduler().runTaskTimer(this, fire, 1200L, 1200L);   // fire housekeeping every minute
@@ -136,6 +140,7 @@ public final class LabraPlugin extends JavaPlugin {
         if (scp1079body != null) scp1079body.shutdown();
         if (scp1079crate != null) scp1079crate.shutdown();
         if (playerRig != null) playerRig.shutdown();
+        if (bmRig != null) bmRig.shutdown();
     }
 
     /** /credits - check or move the credit balance. */
@@ -534,6 +539,29 @@ public final class LabraPlugin extends JavaPlugin {
                         return error(sender, "Unknown attribute. Options: walk-speed walk-amp stance-speed head-pivot head-pivot-z invert-arms invert-legs.");
                     return ok(sender, "Set " + sub + " = " + args[2] + ". Live on the rig now.");
                 }
+                case "bmrig" -> {
+                    // /lab bmrig [player] - toggle the BetterModel third-person rig on a player
+                    if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
+                    if (!bmRig.available()) return error(sender, "BetterModel plugin not installed.");
+                    Player target = args.length >= 2 ? getServer().getPlayerExact(args[1])
+                        : (sender instanceof Player self ? self : null);
+                    if (target == null) return error(sender, "Player not found.");
+                    if (bmRig.hasRig(target)) { bmRig.despawn(target); return ok(sender, target.getName() + " BetterModel rig OFF."); }
+                    return bmRig.spawn(target)
+                        ? ok(sender, target.getName() + " BetterModel rig ON (model: config bmrig.model).")
+                        : error(sender, "Could not bind rig - see the message / console.");
+                }
+                case "bmanim" -> {
+                    // /lab bmanim <key> [player] - fire a one-shot BetterModel animation (fire/reload/...) for testing
+                    if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
+                    if (args.length < 2) return error(sender, "/lab bmanim <fire|reload|...> [player]");
+                    Player target = args.length >= 3 ? getServer().getPlayerExact(args[2])
+                        : (sender instanceof Player self ? self : null);
+                    if (target == null) return error(sender, "Player not found.");
+                    if (!bmRig.hasRig(target)) return error(sender, target.getName() + " has no BetterModel rig (/lab bmrig first).");
+                    bmRig.trigger(target, args[1].toLowerCase());
+                    return ok(sender, "Played BetterModel '" + args[1] + "' on " + target.getName() + ".");
+                }
                 case "fire" -> {
                     // /lab fire clear [radius]  -> put out every fire block around you (emergency cleanup)
                     if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
@@ -569,7 +597,7 @@ public final class LabraPlugin extends JavaPlugin {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         return switch (args.length) {
-            case 1 -> filter(Stream.of("give", "zone", "place", "extinguisher", "sprinkler", "removemachines", "admin", "scp1499", "hud", "menu", "rig", "rigtune", "riganim", "fire", "reload"), args[0]);
+            case 1 -> filter(Stream.of("give", "zone", "place", "extinguisher", "sprinkler", "removemachines", "admin", "scp1499", "hud", "menu", "rig", "rigtune", "riganim", "bmrig", "bmanim", "fire", "reload"), args[0]);
             case 2 -> switch (args[0].toLowerCase()) {
                 case "rigtune" -> filter(Stream.concat(Stream.of("show", "reset"),
                     Stream.of(PlayerRig.TUNABLE)), args[1]);
