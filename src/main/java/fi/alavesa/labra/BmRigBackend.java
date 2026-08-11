@@ -1,46 +1,61 @@
 package fi.alavesa.labra;
 
 import kr.toxicity.model.api.BetterModel;
+import kr.toxicity.model.api.animation.AnimationIterator;
 import kr.toxicity.model.api.animation.AnimationModifier;
 import kr.toxicity.model.api.data.renderer.ModelRenderer;
 import kr.toxicity.model.api.platform.PlatformPlayer;
 import kr.toxicity.model.api.tracker.EntityTracker;
+import kr.toxicity.model.api.util.function.BonePredicate;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
+import org.joml.Quaternionf;
 
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * The BetterModel-touching half of the rig. This class is ONLY loaded when BetterModel is installed
- * (see {@link BmRig}), so it may reference the BetterModel API freely.
+ * The BetterModel-touching half of the rig (only loaded when BetterModel is installed - see {@link BmRig}).
  *
- * BetterModel API (3.4.1):
- *   ModelRenderer r = BetterModel.model(name).orElse(null);
- *   PlatformPlayer pp = BetterModel.platform().adapter().player(uuid);
- *   EntityTracker t = r.getOrCreate(pp);          // creates + auto-tracks the rig on the player
- *   t.animate("walk"); t.stopAnimation("walk");   // loop control
- *   t.animate("fire", AnimationModifier.DEFAULT_WITH_PLAY_ONCE);   // one-shot
- *   t.close();                                     // remove the rig
+ * Drives a fully-rigged third-person player body:
+ *  - LOCOMOTION (priority 0, looping): idle / walk / run / jump, chosen from speed + airborne state.
+ *  - HIP POINTING: the movement DIRECTION relative to where you look is written into a bone named
+ *    "hip" via a local-rotation modifier registered once at spawn. So one walk/run clip (legs striding
+ *    straight forward) is aimed wherever you actually move - W = 0, W+D = 45, D = 90, S = 180.
+ *  - OVERLAY (priority 10, looping, arm bones only): hold_item / hold_gun / aim, layered on top of the
+ *    locomotion clip so "gun while running" = run (legs) + hold_gun (arms) at once.
+ *  - ONE-SHOTS (priority 20, play once): fire / reload, fired via {@link #trigger}; they layer over the
+ *    arms for a configured duration while the legs keep moving.
+ *
+ * All animation names + the hip bone + one-shot durations are config-driven (bmrig.*), so whatever you
+ * author in Blockbench maps straight through. Any extra animation is rigged just by naming it.
  */
 final class BmRigBackend implements BmRig.RigBackend {
 
     private final LabraPlugin plugin;
     private final Map<UUID, Bound> rigs = new ConcurrentHashMap<>();
 
+    private static final AnimationModifier LOCO = AnimationModifier.builder().priority(0).type(AnimationIterator.Type.LOOP).build();
+    private static final AnimationModifier OVERLAY = AnimationModifier.builder().priority(10).type(AnimationIterator.Type.LOOP).build();
+    private static final AnimationModifier ONESHOT = AnimationModifier.builder().priority(20).type(AnimationIterator.Type.PLAY_ONCE).build();
+
     BmRigBackend(LabraPlugin plugin) { this.plugin = plugin; }
 
     private static final class Bound {
         EntityTracker tracker;
+        volatile float hipYaw;   // radians, read every frame by the hip rotation modifier
         String locomotion = "";
+        String overlay = "";
         String oneShot = "";
         long oneShotUntil;
         Location last;
     }
 
     private String modelName() { return plugin.getConfig().getString("bmrig.model", "player_rig"); }
+    private String hipBone() { return plugin.getConfig().getString("bmrig.hip-bone", "hip"); }
+    private double hipSign() { return plugin.getConfig().getDouble("bmrig.hip-sign", 1.0); }
     private String anim(String key, String def) { return plugin.getConfig().getString("bmrig.animations." + key, def); }
     private int oneShotTicks(String key) { return plugin.getConfig().getInt("bmrig.durations." + key, 20); }
 
@@ -57,13 +72,24 @@ final class BmRigBackend implements BmRig.RigBackend {
         }
         PlatformPlayer pp = BetterModel.platform().adapter().player(player.getUniqueId());
         EntityTracker tracker = renderer.getOrCreate(pp);   // creates + auto-tracks the rig on the player
-        player.setInvisible(true);                          // hide the vanilla body; the model stands in
+        player.setInvisible(true);
+
         Bound b = new Bound();
         b.tracker = tracker;
         b.last = player.getLocation();
-        b.locomotion = anim("idle", "idle");
+
+        // HIP POINTING: one local-rotation modifier on the "hip" bone, reading this rig's live hipYaw.
+        String hip = hipBone();
+        if (hip != null && !hip.isEmpty()) {
+            final Bound bref = b;
+            tracker.getPipeline().addLocalRotModifier(
+                BonePredicate.name(hip).withoutChildren(),          // the hip bone; its children inherit the turn
+                q -> new Quaternionf(q).rotateY(bref.hipYaw));
+        }
+
         rigs.put(player.getUniqueId(), b);
-        safeAnimate(b, b.locomotion, false);
+        b.locomotion = anim("idle", "idle");
+        safeAnimate(b, b.locomotion, LOCO);
         return true;
     }
 
@@ -89,23 +115,48 @@ final class BmRigBackend implements BmRig.RigBackend {
             if (player.isOnline()) player.setInvisible(false);
             return;
         }
-        long now = player.getWorld().getFullTime();
+
         Location at = player.getLocation();
-        if (!b.oneShot.isEmpty()) {
-            if (now >= b.oneShotUntil) { b.oneShot = ""; b.locomotion = ""; }   // let the loop reassert locomotion
-            else { b.last = at.clone(); return; }
-        }
         double dx = at.getX() - b.last.getX(), dz = at.getZ() - b.last.getZ();
         double speed = Math.sqrt(dx * dx + dz * dz);
         b.last = at.clone();
-        String want = player.isSneaking() && isHoldingGun(player) ? anim("aim", "aim")
+
+        // HIP: aim the hips at the movement direction relative to the look yaw. Eased back to 0 when still.
+        if (speed > 0.02) {
+            double moveYaw = Math.toDegrees(Math.atan2(-dx, dz));   // Minecraft yaw of the movement direction
+            double rel = moveYaw - at.getYaw();
+            rel = ((rel + 180) % 360 + 360) % 360 - 180;            // normalise to -180..180
+            b.hipYaw = (float) (Math.toRadians(rel) * hipSign());
+        } else {
+            b.hipYaw *= 0.6f;
+        }
+
+        long now = player.getWorld().getFullTime();
+
+        // Expire a finished one-shot (fire/reload) - legs kept moving underneath the whole time.
+        if (!b.oneShot.isEmpty() && now >= b.oneShotUntil) { safeStop(b, b.oneShot); b.oneShot = ""; }
+
+        // LOCOMOTION (priority 0)
+        boolean airborne = !player.isOnGround();
+        String loco = airborne ? anim("jump", "jump")
             : speed > 0.18 ? anim("run", "run")
             : speed > 0.02 ? anim("walk", "walk")
             : anim("idle", "idle");
-        if (!want.equals(b.locomotion)) {
+        if (!loco.equals(b.locomotion)) {
             if (!b.locomotion.isEmpty()) safeStop(b, b.locomotion);
-            safeAnimate(b, want, false);
-            b.locomotion = want;
+            safeAnimate(b, loco, LOCO);
+            b.locomotion = loco;
+        }
+
+        // OVERLAY (priority 10, arm bones) - what's in your hands
+        String ov = player.isSneaking() && isHoldingGun(player) ? anim("aim", "aim")
+            : isHoldingGun(player) ? anim("hold_gun", "hold_gun")
+            : hasHandItem(player) ? anim("hold_item", "hold_item")
+            : "";
+        if (!ov.equals(b.overlay)) {
+            if (!b.overlay.isEmpty()) safeStop(b, b.overlay);
+            if (!ov.isEmpty()) safeAnimate(b, ov, OVERLAY);
+            b.overlay = ov;
         }
     }
 
@@ -114,19 +165,18 @@ final class BmRigBackend implements BmRig.RigBackend {
         Bound b = rigs.get(player.getUniqueId());
         if (b == null || b.tracker == null) return;
         String animName = anim(key, key);
-        if (!b.locomotion.isEmpty()) { safeStop(b, b.locomotion); b.locomotion = ""; }
-        safeAnimate(b, animName, true);
+        safeAnimate(b, animName, ONESHOT);   // layers over the arms; legs keep their locomotion
         b.oneShot = animName;
         b.oneShotUntil = player.getWorld().getFullTime() + Math.max(1, oneShotTicks(key));
     }
 
-    private void safeAnimate(Bound b, String name, boolean once) {
+    private void safeAnimate(Bound b, String name, AnimationModifier modifier) {
         if (name == null || name.isEmpty()) return;
-        try { b.tracker.animate(name, once ? AnimationModifier.DEFAULT_WITH_PLAY_ONCE : AnimationModifier.DEFAULT); }
-        catch (Exception ignored) { }
+        try { b.tracker.animate(name, modifier); } catch (Exception ignored) { }
     }
 
     private void safeStop(Bound b, String name) {
+        if (name == null || name.isEmpty()) return;
         try { b.tracker.stopAnimation(name); } catch (Exception ignored) { }
     }
 
@@ -134,6 +184,11 @@ final class BmRigBackend implements BmRig.RigBackend {
         var it = p.getInventory().getItemInMainHand();
         return it != null && it.hasItemMeta() && it.getItemMeta().getPersistentDataContainer()
             .has(new org.bukkit.NamespacedKey("guns", "id"), org.bukkit.persistence.PersistentDataType.STRING);
+    }
+
+    private boolean hasHandItem(Player p) {
+        var it = p.getInventory().getItemInMainHand();
+        return it != null && !it.getType().isAir();
     }
 
     @Override
