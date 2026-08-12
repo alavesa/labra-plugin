@@ -45,13 +45,18 @@ final class BmRigBackend implements BmRig.RigBackend {
 
     private static final class Bound {
         EntityTracker tracker;
-        volatile float hipYaw;   // radians, read every frame by the hip rotation modifier
+        volatile float hipYaw;   // radians, hip offset from the look yaw, read every frame by the modifier
+        float bodyYaw;           // WORLD yaw the lower body currently faces (holds when idle - no snap-back)
         String locomotion = "";
         String overlay = "";
         String oneShot = "";
         long oneShotUntil;
         Location last;
     }
+
+    private static float wrap(float deg) { return ((deg + 180f) % 360f + 360f) % 360f - 180f; }
+    /** Move an angle toward a target the short way round, by fraction t. */
+    private static float approachAngle(float cur, float target, float t) { return cur + wrap(target - cur) * t; }
 
     private String modelName() { return plugin.getConfig().getString("bmrig.model", "player_rig"); }
     private String hipBone() { return plugin.getConfig().getString("bmrig.hip-bone", "hip"); }
@@ -87,6 +92,7 @@ final class BmRigBackend implements BmRig.RigBackend {
                 q -> new Quaternionf(q).rotateY(bref.hipYaw));
         }
 
+        b.bodyYaw = player.getLocation().getYaw();
         rigs.put(player.getUniqueId(), b);
         b.locomotion = anim("idle", "idle");
         safeAnimate(b, b.locomotion, LOCO);
@@ -121,26 +127,33 @@ final class BmRigBackend implements BmRig.RigBackend {
         double speed = Math.sqrt(dx * dx + dz * dz);
         b.last = at.clone();
 
-        // HIP: aim the hips at the movement direction relative to the look yaw. Eased back to 0 when still.
+        // BODY/HIP FACING: the lower body has its OWN world yaw. While moving it turns toward the
+        // movement direction; when you stop it HOLDS there (no snap back to where you look). It only
+        // follows the head when you look more than body-turn-limit degrees away from the body, and then
+        // just enough to stay within that limit. The head bone (BetterModel head-tracking) still faces
+        // your look independently. hipYaw is that body yaw expressed relative to the look yaw.
+        float lookYaw = at.getYaw();
         if (speed > 0.02) {
-            double moveYaw = Math.toDegrees(Math.atan2(-dx, dz));   // Minecraft yaw of the movement direction
-            double rel = moveYaw - at.getYaw();
-            rel = ((rel + 180) % 360 + 360) % 360 - 180;            // normalise to -180..180
-            b.hipYaw = (float) (Math.toRadians(rel) * hipSign());
-        } else {
-            b.hipYaw *= 0.6f;
+            float moveYaw = (float) Math.toDegrees(Math.atan2(-dx, dz));   // movement direction (world)
+            b.bodyYaw = approachAngle(b.bodyYaw, moveYaw, 0.3f);
         }
+        float limit = (float) plugin.getConfig().getDouble("bmrig.body-turn-limit", 90.0);
+        float diff = wrap(lookYaw - b.bodyYaw);
+        if (Math.abs(diff) > limit) {                              // looked too far around -> drag the body along
+            b.bodyYaw = approachAngle(b.bodyYaw, lookYaw - Math.signum(diff) * limit, 0.5f);
+        }
+        b.hipYaw = (float) (Math.toRadians(wrap(b.bodyYaw - lookYaw)) * hipSign());
 
         long now = player.getWorld().getFullTime();
 
         // Expire a finished one-shot (fire/reload) - legs kept moving underneath the whole time.
         if (!b.oneShot.isEmpty() && now >= b.oneShotUntil) { safeStop(b, b.oneShot); b.oneShot = ""; }
 
-        // LOCOMOTION (priority 0)
+        // LOCOMOTION (priority 0). Default clip names match a typical .bbmodel: idle/walking/running/jumping.
         boolean airborne = !player.isOnGround();
-        String loco = airborne ? anim("jump", "jump")
-            : speed > 0.18 ? anim("run", "run")
-            : speed > 0.02 ? anim("walk", "walk")
+        String loco = airborne ? anim("jump", "jumping")
+            : speed > 0.18 ? anim("run", "running")
+            : speed > 0.02 ? anim("walk", "walking")
             : anim("idle", "idle");
         if (!loco.equals(b.locomotion)) {
             if (!b.locomotion.isEmpty()) safeStop(b, b.locomotion);

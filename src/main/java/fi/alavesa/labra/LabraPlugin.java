@@ -562,6 +562,45 @@ public final class LabraPlugin extends JavaPlugin {
                     bmRig.trigger(target, args[1].toLowerCase());
                     return ok(sender, "Played BetterModel '" + args[1] + "' on " + target.getName() + ".");
                 }
+                case "bmset" -> {
+                    // In-game editor for the BetterModel rig, like the gun settings. Map every action's
+                    // animation to whatever it's called in the .bbmodel, plus the rig params - live + saved.
+                    //   /lab bmset <action> <bbmodel-anim-name>   (idle|walk|run|jump|aim|hold_gun|hold_item|fire|reload)
+                    //   /lab bmset <param> <value>                (model|hip-bone|hip-sign|body-turn-limit)
+                    //   /lab bmset dur <action> <ticks>           (one-shot length, e.g. fire/reload)
+                    //   /lab bmset show | reset
+                    if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
+                    if (args.length < 2) return error(sender,
+                        "/lab bmset <action> <animName> | <param> <value> | dur <action> <ticks> | show | reset");
+                    String sub = args[1].toLowerCase();
+                    java.util.Set<String> params = java.util.Set.of("model", "hip-bone", "hip-sign", "body-turn-limit");
+                    if (sub.equals("show")) {
+                        var sec = getConfig().getConfigurationSection("bmrig.animations");
+                        sender.sendMessage(Component.text("model=" + getConfig().getString("bmrig.model", "player_rig")
+                            + "  hip-bone=" + getConfig().getString("bmrig.hip-bone", "hip")
+                            + "  hip-sign=" + getConfig().getDouble("bmrig.hip-sign", 1.0)
+                            + "  body-turn-limit=" + getConfig().getDouble("bmrig.body-turn-limit", 90.0), NamedTextColor.AQUA));
+                        for (String a : new String[]{"idle","walk","run","jump","aim","hold_gun","hold_item","fire","reload"})
+                            sender.sendMessage(Component.text(String.format("  %-10s -> %s", a,
+                                getConfig().getString("bmrig.animations." + a, "(default)")), NamedTextColor.GRAY));
+                        return true;
+                    }
+                    if (sub.equals("reset")) { getConfig().set("bmrig", null); saveConfig(); return ok(sender, "bmrig config reset to defaults."); }
+                    if (sub.equals("dur")) {
+                        if (args.length < 4) return error(sender, "/lab bmset dur <action> <ticks>");
+                        try { getConfig().set("bmrig.durations." + args[2].toLowerCase(), Integer.parseInt(args[3])); }
+                        catch (NumberFormatException e) { return error(sender, "Ticks must be a number."); }
+                        saveConfig();
+                        return ok(sender, "Set " + args[2] + " duration = " + args[3] + " ticks.");
+                    }
+                    if (args.length < 3) return error(sender, "/lab bmset <action|param> <value>");
+                    String value = args[2];
+                    if (params.contains(sub)) getConfig().set("bmrig." + sub, sub.equals("hip-sign") || sub.equals("body-turn-limit")
+                        ? (Object) Double.parseDouble(value) : value);
+                    else getConfig().set("bmrig.animations." + sub, value);   // action -> .bbmodel animation name
+                    saveConfig();
+                    return ok(sender, "Set bmrig " + sub + " = " + value + ". Live on the rig now.");
+                }
                 case "fire" -> {
                     // /lab fire clear [radius]  -> put out every fire block around you (emergency cleanup)
                     if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
@@ -597,12 +636,14 @@ public final class LabraPlugin extends JavaPlugin {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         return switch (args.length) {
-            case 1 -> filter(Stream.of("give", "zone", "place", "extinguisher", "sprinkler", "removemachines", "admin", "scp1499", "hud", "menu", "rig", "rigtune", "riganim", "bmrig", "bmanim", "fire", "reload"), args[0]);
+            case 1 -> filter(Stream.of("give", "zone", "place", "extinguisher", "sprinkler", "removemachines", "admin", "scp1499", "hud", "menu", "rig", "rigtune", "riganim", "bmrig", "bmanim", "bmset", "fire", "reload"), args[0]);
             case 2 -> switch (args[0].toLowerCase()) {
                 case "rigtune" -> filter(Stream.concat(Stream.of("show", "reset"),
                     Stream.of(PlayerRig.TUNABLE)), args[1]);
                 case "riganim" -> filter(Stream.concat(Stream.of("show", "reset"),
                     Stream.of(PlayerRig.ANIM_ATTRS)), args[1]);
+                case "bmset" -> filter(Stream.of("show", "reset", "dur", "model", "hip-bone", "hip-sign",
+                    "body-turn-limit", "idle", "walk", "run", "jump", "aim", "hold_gun", "hold_item", "fire", "reload"), args[1]);
                 case "hud" -> filter(Stream.concat(Stream.of("credits", "meters"),
                     getServer().getOnlinePlayers().stream().map(Player::getName)), args[1]);
                 case "fire" -> filter(Stream.of("clear"), args[1]);
