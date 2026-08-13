@@ -89,6 +89,8 @@ final class BmRigBackend implements BmRig.RigBackend {
         EntityTracker tracker = renderer.getOrCreate(pp);
         applyRotator(tracker);                              // vanilla-like head/body turning
         player.setInvisible(true);
+        hideEquipment(player);                             // setInvisible doesn't hide worn ARMOR - the
+                                                           // vanilla armour was showing through the rig
 
         Bound b = new Bound();
         b.tracker = tracker;
@@ -124,7 +126,29 @@ final class BmRigBackend implements BmRig.RigBackend {
     public void despawn(Player player) {
         Bound b = rigs.remove(player.getUniqueId());
         if (b != null && b.tracker != null) { try { b.tracker.close(); } catch (Exception ignored) { } }
-        if (player.isOnline()) player.setInvisible(false);
+        if (player.isOnline()) { player.setInvisible(false); showEquipment(player); }
+    }
+
+    /** Hide the rigged player's worn armour + held items from every OTHER player (visual only - real
+     *  equipment/protection is untouched). Re-sent periodically so newly-visible players also see none. */
+    private void hideEquipment(Player p) {
+        org.bukkit.inventory.ItemStack air = new org.bukkit.inventory.ItemStack(org.bukkit.Material.AIR);
+        for (Player v : Bukkit.getOnlinePlayers()) {
+            if (v.equals(p)) continue;
+            for (var slot : org.bukkit.inventory.EquipmentSlot.values())
+                try { v.sendEquipmentChange(p, slot, air); } catch (Exception ignored) { }
+        }
+    }
+
+    /** Restore the real equipment visuals when the rig is removed. */
+    private void showEquipment(Player p) {
+        var eq = p.getEquipment();
+        if (eq == null) return;
+        for (Player v : Bukkit.getOnlinePlayers()) {
+            if (v.equals(p)) continue;
+            for (var slot : org.bukkit.inventory.EquipmentSlot.values())
+                try { v.sendEquipmentChange(p, slot, eq.getItem(slot)); } catch (Exception ignored) { }
+        }
     }
 
     @Override
@@ -149,6 +173,7 @@ final class BmRigBackend implements BmRig.RigBackend {
         b.last = at.clone();
 
         long now = player.getWorld().getFullTime();
+        if (now % 20L == 0L) { applyRotator(b.tracker); hideEquipment(player); }   // keep body-turn config + hide new viewers' armour
         if (!b.oneShot.isEmpty() && now >= b.oneShotUntil) { safeStop(b, b.oneShot); b.oneShot = ""; }
 
         // LOCOMOTION + speed scaling (running plays faster the faster you actually move)
