@@ -6,11 +6,9 @@ import kr.toxicity.model.api.animation.AnimationModifier;
 import kr.toxicity.model.api.data.renderer.ModelRenderer;
 import kr.toxicity.model.api.platform.PlatformPlayer;
 import kr.toxicity.model.api.tracker.EntityTracker;
-import kr.toxicity.model.api.util.function.BonePredicate;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
-import org.joml.Quaternionf;
 
 import java.util.Map;
 import java.util.UUID;
@@ -19,34 +17,30 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * The BetterModel-touching half of the rig (only loaded when BetterModel is installed - see {@link BmRig}).
  *
- * Drives a fully-rigged third-person player body:
- *  - LOCOMOTION (priority 0, looping): idle / walk / run / jump, chosen from speed + airborne state.
- *  - HIP POINTING: the movement DIRECTION relative to where you look is written into a bone named
- *    "hip" via a local-rotation modifier registered once at spawn. So one walk/run clip (legs striding
- *    straight forward) is aimed wherever you actually move - W = 0, W+D = 45, D = 90, S = 180.
- *  - OVERLAY (priority 10, looping, arm bones only): hold_item / hold_gun / aim, layered on top of the
- *    locomotion clip so "gun while running" = run (legs) + hold_gun (arms) at once.
- *  - ONE-SHOTS (priority 20, play once): fire / reload, fired via {@link #trigger}; they layer over the
- *    arms for a configured duration while the legs keep moving.
+ * HEAD/BODY ROTATION is handled by BetterModel's NATIVE body rotator in PLAYER MODE, so it behaves like
+ * a vanilla player: the head turns freely, the body only follows once the head passes a threshold, and
+ * when moving the body postures toward the movement direction. All limits/timing are configurable, so
+ * we don't hand-rotate a "hip" bone anymore (which snapped and translated the legs).
  *
- * All animation names + the hip bone + one-shot durations are config-driven (bmrig.*), so whatever you
- * author in Blockbench maps straight through. Any extra animation is rigged just by naming it.
+ * ANIMATIONS layer by bone + priority:
+ *  - LOCOMOTION (priority 0, loop): idle/walking/running/jumping, its PLAYBACK SPEED scaled by how fast
+ *    the player actually moves (a live FloatSupplier).
+ *  - OVERLAY (priority 10, loop, override=false so it only touches the bones it keyframes): hold_item/
+ *    hold_gun/aim on the arms - layers on top of locomotion so the legs keep moving.
+ *  - ONE-SHOTS (priority 20, play once, override=false): fire/reload on the arms.
+ * Every animation starts with a short blend-in (transition ticks) instead of snapping.
+ * All names/speeds/timing are config-driven (bmrig.*) and editable live with /lab bmset.
  */
 final class BmRigBackend implements BmRig.RigBackend {
 
     private final LabraPlugin plugin;
     private final Map<UUID, Bound> rigs = new ConcurrentHashMap<>();
 
-    private static final AnimationModifier LOCO = AnimationModifier.builder().priority(0).type(AnimationIterator.Type.LOOP).build();
-    private static final AnimationModifier OVERLAY = AnimationModifier.builder().priority(10).type(AnimationIterator.Type.LOOP).build();
-    private static final AnimationModifier ONESHOT = AnimationModifier.builder().priority(20).type(AnimationIterator.Type.PLAY_ONCE).build();
-
     BmRigBackend(LabraPlugin plugin) { this.plugin = plugin; }
 
     private static final class Bound {
         EntityTracker tracker;
-        volatile float hipYaw;   // radians, hip offset from the look yaw, read every frame by the modifier
-        float bodyYaw;           // WORLD yaw the lower body currently faces (holds when idle - no snap-back)
+        volatile float locoSpeed = 1f;   // live playback-speed multiplier for the locomotion clip
         String locomotion = "";
         String overlay = "";
         String oneShot = "";
@@ -54,15 +48,31 @@ final class BmRigBackend implements BmRig.RigBackend {
         Location last;
     }
 
-    private static float wrap(float deg) { return ((deg + 180f) % 360f + 360f) % 360f - 180f; }
-    /** Move an angle toward a target the short way round, by fraction t. */
-    private static float approachAngle(float cur, float target, float t) { return cur + wrap(target - cur) * t; }
-
+    // ---- config ----
     private String modelName() { return plugin.getConfig().getString("bmrig.model", "player_rig"); }
-    private String hipBone() { return plugin.getConfig().getString("bmrig.hip-bone", "hip"); }
-    private double hipSign() { return plugin.getConfig().getDouble("bmrig.hip-sign", 1.0); }
     private String anim(String key, String def) { return plugin.getConfig().getString("bmrig.animations." + key, def); }
     private int oneShotTicks(String key) { return plugin.getConfig().getInt("bmrig.durations." + key, 20); }
+    private int transitionTicks() { return Math.max(0, plugin.getConfig().getInt("bmrig.transition-ticks", 3)); }
+    private double speedScale() { return plugin.getConfig().getDouble("bmrig.speed-scale", 1.0); }
+    private double walkRef() { return plugin.getConfig().getDouble("bmrig.speed.walk-ref", 0.12); }
+    private double runRef() { return plugin.getConfig().getDouble("bmrig.speed.run-ref", 0.22); }
+
+    // ---- modifiers (rebuilt per animate() so live config edits take effect on the next state change) ----
+    private AnimationModifier loco(Bound b) {
+        int t = transitionTicks();
+        return AnimationModifier.builder().priority(0).type(AnimationIterator.Type.LOOP)
+            .start(t).end(t).speed(() -> b.locoSpeed).build();
+    }
+    private AnimationModifier overlay() {
+        int t = transitionTicks();
+        return AnimationModifier.builder().priority(10).type(AnimationIterator.Type.LOOP)
+            .start(t).end(t).override(Boolean.FALSE).build();   // only the bones it keyframes (arms)
+    }
+    private AnimationModifier oneShot() {
+        int t = transitionTicks();
+        return AnimationModifier.builder().priority(20).type(AnimationIterator.Type.PLAY_ONCE)
+            .start(t).end(t).override(Boolean.FALSE).build();
+    }
 
     @Override
     public boolean has(Player p) { return rigs.containsKey(p.getUniqueId()); }
@@ -76,27 +86,38 @@ final class BmRigBackend implements BmRig.RigBackend {
             return false;
         }
         PlatformPlayer pp = BetterModel.platform().adapter().player(player.getUniqueId());
-        EntityTracker tracker = renderer.getOrCreate(pp);   // creates + auto-tracks the rig on the player
+        EntityTracker tracker = renderer.getOrCreate(pp);
+        applyRotator(tracker);                              // vanilla-like head/body turning
         player.setInvisible(true);
 
         Bound b = new Bound();
         b.tracker = tracker;
         b.last = player.getLocation();
-
-        // HIP POINTING: one local-rotation modifier on the "hip" bone, reading this rig's live hipYaw.
-        String hip = hipBone();
-        if (hip != null && !hip.isEmpty()) {
-            final Bound bref = b;
-            tracker.getPipeline().addLocalRotModifier(
-                BonePredicate.name(hip).withoutChildren(),          // the hip bone; its children inherit the turn
-                q -> new Quaternionf(q).rotateY(bref.hipYaw));
-        }
-
-        b.bodyYaw = player.getLocation().getYaw();
         rigs.put(player.getUniqueId(), b);
         b.locomotion = anim("idle", "idle");
-        safeAnimate(b, b.locomotion, LOCO);
+        safeAnimate(b, b.locomotion, loco(b));
         return true;
+    }
+
+    /** Configure BetterModel's native body rotator to act like a vanilla player (head turns first, body
+     *  follows past a limit; postures toward movement). Tunable via bmrig.body.* / bmset. */
+    private void applyRotator(EntityTracker tracker) {
+        try {
+            var cfg = plugin.getConfig();
+            float maxHead = (float) cfg.getDouble("bmrig.body.max-head", 70.0);
+            float maxBody = (float) cfg.getDouble("bmrig.body.max-body", 45.0);
+            float stable = (float) cfg.getDouble("bmrig.body.stable", 0.0);
+            int rotDelay = cfg.getInt("bmrig.body.rotation-delay", 2);
+            int rotDur = cfg.getInt("bmrig.body.rotation-duration", 6);
+            tracker.bodyRotator().setValue(d -> {
+                d.setPlayerMode(true);
+                d.setMinHead(-maxHead); d.setMaxHead(maxHead);
+                d.setMinBody(-maxBody); d.setMaxBody(maxBody);
+                d.setStable(stable);
+                d.setRotationDelay(rotDelay);
+                d.setRotationDuration(rotDur);
+            });
+        } catch (Exception ignored) { }
     }
 
     @Override
@@ -127,50 +148,38 @@ final class BmRigBackend implements BmRig.RigBackend {
         double speed = Math.sqrt(dx * dx + dz * dz);
         b.last = at.clone();
 
-        // BODY/HIP FACING: the lower body has its OWN world yaw. While moving it turns toward the
-        // movement direction; when you stop it HOLDS there (no snap back to where you look). It only
-        // follows the head when you look more than body-turn-limit degrees away from the body, and then
-        // just enough to stay within that limit. The head bone (BetterModel head-tracking) still faces
-        // your look independently. hipYaw is that body yaw expressed relative to the look yaw.
-        float lookYaw = at.getYaw();
-        if (speed > 0.02) {
-            float moveYaw = (float) Math.toDegrees(Math.atan2(-dx, dz));   // movement direction (world)
-            b.bodyYaw = approachAngle(b.bodyYaw, moveYaw, 0.3f);
-        }
-        float limit = (float) plugin.getConfig().getDouble("bmrig.body-turn-limit", 90.0);
-        float diff = wrap(lookYaw - b.bodyYaw);
-        if (Math.abs(diff) > limit) {                              // looked too far around -> drag the body along
-            b.bodyYaw = approachAngle(b.bodyYaw, lookYaw - Math.signum(diff) * limit, 0.5f);
-        }
-        b.hipYaw = (float) (Math.toRadians(wrap(b.bodyYaw - lookYaw)) * hipSign());
-
         long now = player.getWorld().getFullTime();
-
-        // Expire a finished one-shot (fire/reload) - legs kept moving underneath the whole time.
         if (!b.oneShot.isEmpty() && now >= b.oneShotUntil) { safeStop(b, b.oneShot); b.oneShot = ""; }
 
-        // LOCOMOTION (priority 0). Default clip names match a typical .bbmodel: idle/walking/running/jumping.
+        // LOCOMOTION + speed scaling (running plays faster the faster you actually move)
         boolean airborne = !player.isOnGround();
-        String loco = airborne ? anim("jump", "jumping")
-            : speed > 0.18 ? anim("run", "running")
-            : speed > 0.02 ? anim("walk", "walking")
-            : anim("idle", "idle");
-        if (!loco.equals(b.locomotion)) {
+        String locoName;
+        if (airborne) { locoName = anim("jump", "jumping"); b.locoSpeed = 1f; }
+        else if (speed > 0.16) { locoName = anim("run", "running"); b.locoSpeed = speedMult(speed, runRef()); }
+        else if (speed > 0.015) { locoName = anim("walk", "walking"); b.locoSpeed = speedMult(speed, walkRef()); }
+        else { locoName = anim("idle", "idle"); b.locoSpeed = 1f; }
+        if (!locoName.equals(b.locomotion)) {
             if (!b.locomotion.isEmpty()) safeStop(b, b.locomotion);
-            safeAnimate(b, loco, LOCO);
-            b.locomotion = loco;
+            safeAnimate(b, locoName, loco(b));
+            b.locomotion = locoName;
         }
 
-        // OVERLAY (priority 10, arm bones) - what's in your hands
+        // OVERLAY (arms) - what's in your hands, layered over the legs
         String ov = player.isSneaking() && isHoldingGun(player) ? anim("aim", "aim")
             : isHoldingGun(player) ? anim("hold_gun", "hold_gun")
             : hasHandItem(player) ? anim("hold_item", "hold_item")
             : "";
         if (!ov.equals(b.overlay)) {
             if (!b.overlay.isEmpty()) safeStop(b, b.overlay);
-            if (!ov.isEmpty()) safeAnimate(b, ov, OVERLAY);
+            if (!ov.isEmpty()) safeAnimate(b, ov, overlay());
             b.overlay = ov;
         }
+    }
+
+    /** Playback multiplier from actual speed vs the clip's reference speed, clamped to a sane range. */
+    private float speedMult(double speed, double ref) {
+        double m = (ref <= 0 ? 1.0 : speed / ref) * speedScale();
+        return (float) Math.max(0.4, Math.min(2.5, m));
     }
 
     @Override
@@ -178,7 +187,7 @@ final class BmRigBackend implements BmRig.RigBackend {
         Bound b = rigs.get(player.getUniqueId());
         if (b == null || b.tracker == null) return;
         String animName = anim(key, key);
-        safeAnimate(b, animName, ONESHOT);   // layers over the arms; legs keep their locomotion
+        safeAnimate(b, animName, oneShot());   // arms only (override=false); legs keep their locomotion
         b.oneShot = animName;
         b.oneShotUntil = player.getWorld().getFullTime() + Math.max(1, oneShotTicks(key));
     }

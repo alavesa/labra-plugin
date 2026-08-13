@@ -564,28 +564,37 @@ public final class LabraPlugin extends JavaPlugin {
                 }
                 case "bmset" -> {
                     // In-game editor for the BetterModel rig, like the gun settings. Map every action's
-                    // animation to whatever it's called in the .bbmodel, plus the rig params - live + saved.
+                    // animation to its .bbmodel name, plus speeds/transitions/body-rotation - live + saved.
                     //   /lab bmset <action> <bbmodel-anim-name>   (idle|walk|run|jump|aim|hold_gun|hold_item|fire|reload)
-                    //   /lab bmset <param> <value>                (model|hip-bone|hip-sign|body-turn-limit)
-                    //   /lab bmset dur <action> <ticks>           (one-shot length, e.g. fire/reload)
+                    //   /lab bmset <param> <value>   model | speed-scale | transition-ticks | walk-ref | run-ref
+                    //                                | max-head | max-body | rotation-delay | rotation-duration
+                    //   /lab bmset dur <action> <ticks>          (one-shot length, e.g. fire/reload)
                     //   /lab bmset show | reset
                     if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
                     if (args.length < 2) return error(sender,
                         "/lab bmset <action> <animName> | <param> <value> | dur <action> <ticks> | show | reset");
                     String sub = args[1].toLowerCase();
-                    java.util.Set<String> params = java.util.Set.of("model", "hip-bone", "hip-sign", "body-turn-limit");
+                    // param key -> [config path, type]  (type: s=string, d=double, i=int)
+                    java.util.Map<String, String[]> params = java.util.Map.ofEntries(
+                        java.util.Map.entry("model", new String[]{"bmrig.model", "s"}),
+                        java.util.Map.entry("speed-scale", new String[]{"bmrig.speed-scale", "d"}),
+                        java.util.Map.entry("transition-ticks", new String[]{"bmrig.transition-ticks", "i"}),
+                        java.util.Map.entry("walk-ref", new String[]{"bmrig.speed.walk-ref", "d"}),
+                        java.util.Map.entry("run-ref", new String[]{"bmrig.speed.run-ref", "d"}),
+                        java.util.Map.entry("max-head", new String[]{"bmrig.body.max-head", "d"}),
+                        java.util.Map.entry("max-body", new String[]{"bmrig.body.max-body", "d"}),
+                        java.util.Map.entry("rotation-delay", new String[]{"bmrig.body.rotation-delay", "i"}),
+                        java.util.Map.entry("rotation-duration", new String[]{"bmrig.body.rotation-duration", "i"}));
                     if (sub.equals("show")) {
-                        var sec = getConfig().getConfigurationSection("bmrig.animations");
-                        sender.sendMessage(Component.text("model=" + getConfig().getString("bmrig.model", "player_rig")
-                            + "  hip-bone=" + getConfig().getString("bmrig.hip-bone", "hip")
-                            + "  hip-sign=" + getConfig().getDouble("bmrig.hip-sign", 1.0)
-                            + "  body-turn-limit=" + getConfig().getDouble("bmrig.body-turn-limit", 90.0), NamedTextColor.AQUA));
+                        for (var e : params.entrySet())
+                            sender.sendMessage(Component.text(String.format("  %-18s = %s", e.getKey(),
+                                getConfig().get(e.getValue()[0], "(default)")), NamedTextColor.AQUA));
                         for (String a : new String[]{"idle","walk","run","jump","aim","hold_gun","hold_item","fire","reload"})
-                            sender.sendMessage(Component.text(String.format("  %-10s -> %s", a,
+                            sender.sendMessage(Component.text(String.format("  anim %-10s -> %s", a,
                                 getConfig().getString("bmrig.animations." + a, "(default)")), NamedTextColor.GRAY));
                         return true;
                     }
-                    if (sub.equals("reset")) { getConfig().set("bmrig", null); saveConfig(); return ok(sender, "bmrig config reset to defaults."); }
+                    if (sub.equals("reset")) { getConfig().set("bmrig", null); saveConfig(); return ok(sender, "bmrig config reset to defaults (re-toggle /lab bmrig for body params)."); }
                     if (sub.equals("dur")) {
                         if (args.length < 4) return error(sender, "/lab bmset dur <action> <ticks>");
                         try { getConfig().set("bmrig.durations." + args[2].toLowerCase(), Integer.parseInt(args[3])); }
@@ -595,11 +604,18 @@ public final class LabraPlugin extends JavaPlugin {
                     }
                     if (args.length < 3) return error(sender, "/lab bmset <action|param> <value>");
                     String value = args[2];
-                    if (params.contains(sub)) getConfig().set("bmrig." + sub, sub.equals("hip-sign") || sub.equals("body-turn-limit")
-                        ? (Object) Double.parseDouble(value) : value);
-                    else getConfig().set("bmrig.animations." + sub, value);   // action -> .bbmodel animation name
+                    String[] param = params.get(sub);
+                    try {
+                        if (param != null) getConfig().set(param[0], switch (param[1]) {
+                            case "d" -> Double.parseDouble(value);
+                            case "i" -> Integer.parseInt(value);
+                            default -> value;
+                        });
+                        else getConfig().set("bmrig.animations." + sub, value);   // action -> .bbmodel animation name
+                    } catch (NumberFormatException e) { return error(sender, "Value must be a number for " + sub + "."); }
                     saveConfig();
-                    return ok(sender, "Set bmrig " + sub + " = " + value + ". Live on the rig now.");
+                    return ok(sender, "Set bmrig " + sub + " = " + value + (params.containsKey(sub) && (sub.startsWith("max") || sub.startsWith("rotation"))
+                        ? " (re-toggle /lab bmrig to apply body rotation)." : ". Live now."));
                 }
                 case "fire" -> {
                     // /lab fire clear [radius]  -> put out every fire block around you (emergency cleanup)
@@ -642,8 +658,9 @@ public final class LabraPlugin extends JavaPlugin {
                     Stream.of(PlayerRig.TUNABLE)), args[1]);
                 case "riganim" -> filter(Stream.concat(Stream.of("show", "reset"),
                     Stream.of(PlayerRig.ANIM_ATTRS)), args[1]);
-                case "bmset" -> filter(Stream.of("show", "reset", "dur", "model", "hip-bone", "hip-sign",
-                    "body-turn-limit", "idle", "walk", "run", "jump", "aim", "hold_gun", "hold_item", "fire", "reload"), args[1]);
+                case "bmset" -> filter(Stream.of("show", "reset", "dur", "model", "speed-scale", "transition-ticks",
+                    "walk-ref", "run-ref", "max-head", "max-body", "rotation-delay", "rotation-duration",
+                    "idle", "walk", "run", "jump", "aim", "hold_gun", "hold_item", "fire", "reload"), args[1]);
                 case "hud" -> filter(Stream.concat(Stream.of("credits", "meters"),
                     getServer().getOnlinePlayers().stream().map(Player::getName)), args[1]);
                 case "fire" -> filter(Stream.of("clear"), args[1]);
