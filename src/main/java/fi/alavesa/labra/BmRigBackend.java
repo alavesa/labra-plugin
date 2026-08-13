@@ -63,15 +63,19 @@ final class BmRigBackend implements BmRig.RigBackend {
         return AnimationModifier.builder().priority(0).type(AnimationIterator.Type.LOOP)
             .start(t).end(t).speed(() -> b.locoSpeed).build();
     }
+    // override=false SHOULD mean an overlay only touches the bones it keyframes (so hold_gun on the arms
+    // layers over walking legs). If layering still doesn't work in your model, flip bmrig.overlay-override
+    // in-game and see which behaves - it can't be verified headless.
+    private boolean overlayOverride() { return plugin.getConfig().getBoolean("bmrig.overlay-override", false); }
     private AnimationModifier overlay() {
         int t = transitionTicks();
         return AnimationModifier.builder().priority(10).type(AnimationIterator.Type.LOOP)
-            .start(t).end(t).override(Boolean.FALSE).build();   // only the bones it keyframes (arms)
+            .start(t).end(t).override(overlayOverride()).build();
     }
     private AnimationModifier oneShot() {
         int t = transitionTicks();
         return AnimationModifier.builder().priority(20).type(AnimationIterator.Type.PLAY_ONCE)
-            .start(t).end(t).override(Boolean.FALSE).build();
+            .start(t).end(t).override(overlayOverride()).build();
     }
 
     @Override

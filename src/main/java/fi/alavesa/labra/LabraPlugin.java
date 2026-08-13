@@ -584,7 +584,8 @@ public final class LabraPlugin extends JavaPlugin {
                         java.util.Map.entry("max-head", new String[]{"bmrig.body.max-head", "d"}),
                         java.util.Map.entry("max-body", new String[]{"bmrig.body.max-body", "d"}),
                         java.util.Map.entry("rotation-delay", new String[]{"bmrig.body.rotation-delay", "i"}),
-                        java.util.Map.entry("rotation-duration", new String[]{"bmrig.body.rotation-duration", "i"}));
+                        java.util.Map.entry("rotation-duration", new String[]{"bmrig.body.rotation-duration", "i"}),
+                        java.util.Map.entry("overlay-override", new String[]{"bmrig.overlay-override", "b"}));
                     if (sub.equals("show")) {
                         for (var e : params.entrySet())
                             sender.sendMessage(Component.text(String.format("  %-18s = %s", e.getKey(),
@@ -609,6 +610,7 @@ public final class LabraPlugin extends JavaPlugin {
                         if (param != null) getConfig().set(param[0], switch (param[1]) {
                             case "d" -> Double.parseDouble(value);
                             case "i" -> Integer.parseInt(value);
+                            case "b" -> value.equals("1") || value.equalsIgnoreCase("true");
                             default -> value;
                         });
                         else getConfig().set("bmrig.animations." + sub, value);   // action -> .bbmodel animation name
@@ -659,7 +661,7 @@ public final class LabraPlugin extends JavaPlugin {
                 case "riganim" -> filter(Stream.concat(Stream.of("show", "reset"),
                     Stream.of(PlayerRig.ANIM_ATTRS)), args[1]);
                 case "bmset" -> filter(Stream.of("show", "reset", "dur", "model", "speed-scale", "transition-ticks",
-                    "walk-ref", "run-ref", "max-head", "max-body", "rotation-delay", "rotation-duration",
+                    "walk-ref", "run-ref", "max-head", "max-body", "rotation-delay", "rotation-duration", "overlay-override",
                     "idle", "walk", "run", "jump", "aim", "hold_gun", "hold_item", "fire", "reload"), args[1]);
                 case "hud" -> filter(Stream.concat(Stream.of("credits", "meters"),
                     getServer().getOnlinePlayers().stream().map(Player::getName)), args[1]);
