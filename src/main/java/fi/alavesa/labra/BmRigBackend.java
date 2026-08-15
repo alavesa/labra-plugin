@@ -89,6 +89,22 @@ final class BmRigBackend implements BmRig.RigBackend {
             player.sendMessage("§cBetterModel model '" + modelName() + "' not found. Load it into BetterModel and set bmrig.model.");
             return false;
         }
+        // THE real cause of "my held item vanishes from the hotbar and my own hand": BetterModel's own
+        // config key `cancel-player-model-inventory` (default TRUE) makes it cancel the player-model's
+        // inventory, which clears the selected slot in the CLIENT container - and both the 2D hotbar icon
+        // AND the first-person hand render from that container, so both go empty. We can't override it from
+        // here (config is read-only via the API); it must be turned off in BetterModel's config.yml. Warn
+        // the player with the exact fix instead of silently shipping a broken rig.
+        try {
+            if (BetterModel.config().cancelPlayerModelInventory()) {
+                player.sendMessage("§e[Labra] §fBetterModel piilottaa käteen otetun esineen. Korjaa: "
+                    + "§bplugins/BetterModel/config.yml §f-> §acancel-player-model-inventory: false §f"
+                    + "ja aja §b/bettermodel reload§f (tai käynnistä serveri uudelleen).");
+                plugin.getLogger().warning("BetterModel 'cancel-player-model-inventory' is TRUE - the rigged "
+                    + "player's held item will vanish from their hotbar/first-person hand. Set it to false in "
+                    + "plugins/BetterModel/config.yml and /bettermodel reload.");
+            }
+        } catch (Throwable ignored) { }
         PlatformPlayer pp = BetterModel.platform().adapter().player(player.getUniqueId());
         EntityTracker tracker = renderer.getOrCreate(pp);
         applyRotator(tracker);                              // vanilla-like head/body turning
