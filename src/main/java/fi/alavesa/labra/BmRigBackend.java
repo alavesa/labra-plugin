@@ -96,6 +96,15 @@ final class BmRigBackend implements BmRig.RigBackend {
         // the selected hotbar slot looked empty. Turn hiding OFF: the held item must stay in hand
         // (first person is the real item). We hide only the armour ourselves, below.
         try { tracker.hideOption(kr.toxicity.model.api.tracker.EntityHideOption.FALSE); } catch (Exception ignored) { }
+        // Item bones (pri_right_item/pli_left_item) make BetterModel render the player's held item on the
+        // model AND hide the real one - which is why the held item vanished from the hotbar. Disable those
+        // mappers so the real item stays in hand/hotbar (first person is the real item). The gun won't
+        // ride the rig's hand for others - acceptable trade-off (the rig hides from the owner later).
+        try {
+            for (var top : tracker.getPipeline())
+                for (var bone : top.flattenBones())
+                    bone.setItemMapper(kr.toxicity.model.api.bone.BoneItemMapper.EMPTY);
+        } catch (Exception ignored) { }
         player.setInvisible(true);
         hideEquipment(player);                             // hide only ARMOR from other viewers (not the hand)
 
