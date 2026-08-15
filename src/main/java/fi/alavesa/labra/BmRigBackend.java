@@ -192,10 +192,10 @@ final class BmRigBackend implements BmRig.RigBackend {
             // vanishing from the selected hotbar slot because the default hide option hides it.
             try { b.tracker.hideOption(kr.toxicity.model.api.tracker.EntityHideOption.FALSE); } catch (Exception ignored) { }
         }
-        // Force the held item to stay visible to the OWNER every tick (counters BetterModel hiding it,
-        // so it never looks like it disappeared from the hand/hotbar). First person is the real item.
-        var mainHand = player.getInventory().getItemInMainHand();
-        try { player.sendEquipmentChange(player, org.bukkit.inventory.EquipmentSlot.HAND, mainHand); } catch (Exception ignored) { }
+        // The held item kept vanishing from the SELECTED hotbar slot under the rig. The hotbar HUD is
+        // driven by the inventory container (not equipment packets), and BetterModel was hiding the
+        // vanilla main hand, so re-sync the container to the client so the real item shows in the slot.
+        player.updateInventory();
         if (!b.oneShot.isEmpty() && now >= b.oneShotUntil) { safeStop(b, b.oneShot); b.oneShot = ""; }
 
         // LOCOMOTION + speed scaling (running plays faster the faster you actually move)
