@@ -20,6 +20,15 @@ import org.bukkit.event.player.PlayerQuitEvent;
 public final class BmRig implements Listener, Runnable {
 
     private final RigBackend backend;   // null when BetterModel isn't installed
+    private static BmRig INSTANCE;      // static handle so other plugins (Guns) can trigger rig clips
+
+    /** Cross-plugin hook: play a one-shot rig animation (e.g. "reload"/"fire") on a player. Safe no-op
+     *  if BetterModel isn't installed or the player has no rig. Called by the Guns plugin via reflection
+     *  so there's no hard dependency either way. */
+    public static void triggerFor(Player player, String key) {
+        BmRig r = INSTANCE;
+        if (r != null) r.trigger(player, key);
+    }
 
     /** BM-free contract the backend implements, so this front end never touches a BetterModel class. */
     interface RigBackend {
@@ -38,6 +47,7 @@ public final class BmRig implements Listener, Runnable {
             plugin.getLogger().info("BetterModel detected - /lab bmrig available.");
         }
         this.backend = b;
+        INSTANCE = this;
     }
 
     public boolean available() { return backend != null; }
