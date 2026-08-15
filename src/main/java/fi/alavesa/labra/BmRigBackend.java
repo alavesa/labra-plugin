@@ -92,9 +92,12 @@ final class BmRigBackend implements BmRig.RigBackend {
         PlatformPlayer pp = BetterModel.platform().adapter().player(player.getUniqueId());
         EntityTracker tracker = renderer.getOrCreate(pp);
         applyRotator(tracker);                              // vanilla-like head/body turning
+        // BetterModel's default hide option hides the entity's EQUIPMENT - including the held item, so
+        // the selected hotbar slot looked empty. Turn hiding OFF: the held item must stay in hand
+        // (first person is the real item). We hide only the armour ourselves, below.
+        try { tracker.hideOption(kr.toxicity.model.api.tracker.EntityHideOption.FALSE); } catch (Exception ignored) { }
         player.setInvisible(true);
-        hideEquipment(player);                             // setInvisible doesn't hide worn ARMOR - the
-                                                           // vanilla armour was showing through the rig
+        hideEquipment(player);                             // hide only ARMOR from other viewers (not the hand)
 
         Bound b = new Bound();
         b.tracker = tracker;
