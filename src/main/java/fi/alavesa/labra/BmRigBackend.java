@@ -185,7 +185,17 @@ final class BmRigBackend implements BmRig.RigBackend {
         b.last = at.clone();
 
         long now = player.getWorld().getFullTime();
-        if (now % 20L == 0L) { applyRotator(b.tracker); hideEquipment(player); }   // keep body-turn config + hide new viewers' armour
+        if (now % 20L == 0L) {
+            applyRotator(b.tracker);
+            hideEquipment(player);   // keep body-turn config + hide new viewers' armour
+            // Re-assert that BetterModel is NOT hiding the entity's equipment - the held item kept
+            // vanishing from the selected hotbar slot because the default hide option hides it.
+            try { b.tracker.hideOption(kr.toxicity.model.api.tracker.EntityHideOption.FALSE); } catch (Exception ignored) { }
+        }
+        // Force the held item to stay visible to the OWNER every tick (counters BetterModel hiding it,
+        // so it never looks like it disappeared from the hand/hotbar). First person is the real item.
+        var mainHand = player.getInventory().getItemInMainHand();
+        try { player.sendEquipmentChange(player, org.bukkit.inventory.EquipmentSlot.HAND, mainHand); } catch (Exception ignored) { }
         if (!b.oneShot.isEmpty() && now >= b.oneShotUntil) { safeStop(b, b.oneShot); b.oneShot = ""; }
 
         // LOCOMOTION + speed scaling (running plays faster the faster you actually move)
