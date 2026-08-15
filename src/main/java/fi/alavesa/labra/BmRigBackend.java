@@ -133,25 +133,30 @@ final class BmRigBackend implements BmRig.RigBackend {
         if (player.isOnline()) { player.setInvisible(false); showEquipment(player); }
     }
 
-    /** Hide the rigged player's worn armour + held items from every OTHER player (visual only - real
-     *  equipment/protection is untouched). Re-sent periodically so newly-visible players also see none. */
+    /** Only the ARMOUR slots are hidden - never the hands. The held item must stay in hand: first person
+     *  is the real item (with its own animations), and it must never look like it vanished. */
+    private static final org.bukkit.inventory.EquipmentSlot[] ARMOR = {
+        org.bukkit.inventory.EquipmentSlot.HEAD, org.bukkit.inventory.EquipmentSlot.CHEST,
+        org.bukkit.inventory.EquipmentSlot.LEGS, org.bukkit.inventory.EquipmentSlot.FEET
+    };
+
+    /** Hide the rigged player's worn ARMOUR from other viewers (visual only; real protection untouched)
+     *  so it doesn't render on the vanilla body under the rig. Held items are left alone. */
     private void hideEquipment(Player p) {
         org.bukkit.inventory.ItemStack air = new org.bukkit.inventory.ItemStack(org.bukkit.Material.AIR);
         for (Player v : Bukkit.getOnlinePlayers()) {
             if (v.equals(p)) continue;
-            for (var slot : org.bukkit.inventory.EquipmentSlot.values())
-                try { v.sendEquipmentChange(p, slot, air); } catch (Exception ignored) { }
+            for (var slot : ARMOR) try { v.sendEquipmentChange(p, slot, air); } catch (Exception ignored) { }
         }
     }
 
-    /** Restore the real equipment visuals when the rig is removed. */
+    /** Restore the real armour visuals when the rig is removed. */
     private void showEquipment(Player p) {
         var eq = p.getEquipment();
         if (eq == null) return;
         for (Player v : Bukkit.getOnlinePlayers()) {
             if (v.equals(p)) continue;
-            for (var slot : org.bukkit.inventory.EquipmentSlot.values())
-                try { v.sendEquipmentChange(p, slot, eq.getItem(slot)); } catch (Exception ignored) { }
+            for (var slot : ARMOR) try { v.sendEquipmentChange(p, slot, eq.getItem(slot)); } catch (Exception ignored) { }
         }
     }
 
