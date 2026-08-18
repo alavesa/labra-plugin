@@ -30,8 +30,6 @@ public final class LabraPlugin extends JavaPlugin {
     private Scp018Listener scp018;
     private Scp1079Body scp1079body;
     private Scp1079Crate scp1079crate;
-    private PlayerRig playerRig;
-    private BmRig bmRig;
     private FireManager fire;
 
     @Override
@@ -73,13 +71,6 @@ public final class LabraPlugin extends JavaPlugin {
         getServer().getScheduler().runTaskTimer(this, scp1079crate::rescan, 100L, 100L);     // pick up chunk-loaded crates
         getServer().getScheduler().runTaskTimer(this, scp1079crate::idleTick, 200L, 200L);   // idle crates return home
         getServer().getPluginManager().registerEvents(new Scp1079Listener(this, registry, scp1079body, scp1079crate), this);
-        playerRig = new PlayerRig(this);
-        getServer().getPluginManager().registerEvents(playerRig, this);
-        getServer().getScheduler().runTask(this, playerRig::sweepOrphans);
-        getServer().getScheduler().runTaskTimer(this, playerRig, 40L, 1L);   // puppeteer rig parts every frame
-        bmRig = new BmRig(this);   // BetterModel third-person rig (soft-depend; opt-in via /lab bmrig)
-        getServer().getPluginManager().registerEvents(bmRig, this);
-        getServer().getScheduler().runTaskTimer(this, bmRig, 40L, 1L);   // locomotion state each tick
         getServer().getScheduler().runTaskTimer(this, new MopListener(this, registry, scp1079body), 40L, 2L);   // scrub-while-held
         getServer().getPluginManager().registerEvents(new SnackListener(registry), this);
         getServer().getScheduler().runTaskTimer(this, fire, 1200L, 1200L);   // fire housekeeping every minute
@@ -139,8 +130,6 @@ public final class LabraPlugin extends JavaPlugin {
         if (scp018 != null) scp018.shutdown();
         if (scp1079body != null) scp1079body.shutdown();
         if (scp1079crate != null) scp1079crate.shutdown();
-        if (playerRig != null) playerRig.shutdown();
-        if (bmRig != null) bmRig.shutdown();
     }
 
     /** /credits - check or move the credit balance. */
@@ -487,138 +476,6 @@ public final class LabraPlugin extends JavaPlugin {
                     labMenu.open(player, 0);
                     return true;
                 }
-                case "rig" -> {
-                    // /lab rig [player] - toggle the display-entity player rig (invisible body + 6 parts)
-                    if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
-                    Player target = args.length >= 2 ? getServer().getPlayerExact(args[1])
-                        : (sender instanceof Player self ? self : null);
-                    if (target == null) return error(sender, "Player not found.");
-                    if (playerRig.hasRig(target)) { playerRig.despawn(target); return ok(sender, target.getName() + " rig OFF."); }
-                    playerRig.spawn(target);
-                    return ok(sender, target.getName() + " rig ON (4 parts: head=skin, torso/arms/legs=<prefix>_<part>). Align with /lab rigtune.");
-                }
-                case "rigtune" -> {
-                    // /lab rigtune <part> <field> <value|+delta>  |  show [part]  |  reset [part|all]
-                    if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
-                    if (args.length < 2) return error(sender,
-                        "/lab rigtune <head|torso|arms|legs|gun> <x|y|z|yaw|pitch|scale> <value | +/-delta>  |  show [part]  |  reset [part|all]");
-                    String sub = args[1].toLowerCase();
-                    if (sub.equals("show")) {
-                        String part = args.length >= 3 ? args[2].toLowerCase() : null;
-                        for (String line : playerRig.tuneStatus(part))
-                            sender.sendMessage(Component.text(line, NamedTextColor.AQUA));
-                        return true;
-                    }
-                    if (sub.equals("reset")) {
-                        playerRig.resetTune(args.length >= 3 ? args[2].toLowerCase() : "all");
-                        return ok(sender, "Rig tune reset" + (args.length >= 3 ? " for " + args[2] : "") + ".");
-                    }
-                    if (args.length < 4) return error(sender, "/lab rigtune <part> <field> <value | +/-delta>");
-                    String part = sub, field = args[2].toLowerCase(), raw = args[3];
-                    boolean relative = raw.startsWith("+") || raw.startsWith("-");
-                    double value;
-                    try { value = Double.parseDouble(raw); }
-                    catch (NumberFormatException e) { return error(sender, "Value must be a number (e.g. 1.5 or +0.1)."); }
-                    if (!playerRig.setTune(part, field, value, relative))
-                        return error(sender, "Unknown part/field. Parts: head torso arms legs gun. Fields: x y z yaw pitch scale.");
-                    return ok(sender, "Set " + part + "." + field + " = " + (relative ? "(nudged) " : "") + raw + ". Live on the rig now.");
-                }
-                case "riganim" -> {
-                    // /lab riganim <attr> <value>  |  show  |  reset  - tune walk/crouch/equip anim speeds
-                    if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
-                    if (args.length < 2) return error(sender,
-                        "/lab riganim <walk-speed|walk-amp|stance-speed|head-pivot|head-pivot-z|invert-arms|invert-legs> <value>  |  show  |  reset");
-                    String sub = args[1].toLowerCase();
-                    if (sub.equals("show")) return ok(sender, playerRig.animStatus());
-                    if (sub.equals("reset")) { playerRig.resetAnim(); return ok(sender, "Rig anim reset to defaults."); }
-                    if (args.length < 3) return error(sender, "/lab riganim <attr> <value>  (invert-* take 0 or 1)");
-                    double value;
-                    try { value = Double.parseDouble(args[2]); }
-                    catch (NumberFormatException e) { return error(sender, "Value must be a number (invert-* = 0 or 1)."); }
-                    if (!playerRig.setAnim(sub, value))
-                        return error(sender, "Unknown attribute. Options: walk-speed walk-amp stance-speed head-pivot head-pivot-z invert-arms invert-legs.");
-                    return ok(sender, "Set " + sub + " = " + args[2] + ". Live on the rig now.");
-                }
-                case "bmrig" -> {
-                    // /lab bmrig [player] - toggle the BetterModel third-person rig on a player
-                    if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
-                    if (!bmRig.available()) return error(sender, "BetterModel plugin not installed.");
-                    Player target = args.length >= 2 ? getServer().getPlayerExact(args[1])
-                        : (sender instanceof Player self ? self : null);
-                    if (target == null) return error(sender, "Player not found.");
-                    if (bmRig.hasRig(target)) { bmRig.despawn(target); return ok(sender, target.getName() + " BetterModel rig OFF."); }
-                    return bmRig.spawn(target)
-                        ? ok(sender, target.getName() + " BetterModel rig ON (model: config bmrig.model).")
-                        : error(sender, "Could not bind rig - see the message / console.");
-                }
-                case "bmanim" -> {
-                    // /lab bmanim <key> [player] - fire a one-shot BetterModel animation (fire/reload/...) for testing
-                    if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
-                    if (args.length < 2) return error(sender, "/lab bmanim <fire|reload|...> [player]");
-                    Player target = args.length >= 3 ? getServer().getPlayerExact(args[2])
-                        : (sender instanceof Player self ? self : null);
-                    if (target == null) return error(sender, "Player not found.");
-                    if (!bmRig.hasRig(target)) return error(sender, target.getName() + " has no BetterModel rig (/lab bmrig first).");
-                    bmRig.trigger(target, args[1].toLowerCase());
-                    return ok(sender, "Played BetterModel '" + args[1] + "' on " + target.getName() + ".");
-                }
-                case "bmset" -> {
-                    // In-game editor for the BetterModel rig, like the gun settings. Map every action's
-                    // animation to its .bbmodel name, plus speeds/transitions/body-rotation - live + saved.
-                    //   /lab bmset <action> <bbmodel-anim-name>   (idle|walk|run|jump|aim|hold_gun|hold_item|fire|reload)
-                    //   /lab bmset <param> <value>   model | speed-scale | transition-ticks | walk-ref | run-ref
-                    //                                | max-head | max-body | rotation-delay | rotation-duration
-                    //   /lab bmset dur <action> <ticks>          (one-shot length, e.g. fire/reload)
-                    //   /lab bmset show | reset
-                    if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
-                    if (args.length < 2) return error(sender,
-                        "/lab bmset <action> <animName> | <param> <value> | dur <action> <ticks> | show | reset");
-                    String sub = args[1].toLowerCase();
-                    // param key -> [config path, type]  (type: s=string, d=double, i=int)
-                    java.util.Map<String, String[]> params = java.util.Map.ofEntries(
-                        java.util.Map.entry("model", new String[]{"bmrig.model", "s"}),
-                        java.util.Map.entry("speed-scale", new String[]{"bmrig.speed-scale", "d"}),
-                        java.util.Map.entry("transition-ticks", new String[]{"bmrig.transition-ticks", "i"}),
-                        java.util.Map.entry("walk-ref", new String[]{"bmrig.speed.walk-ref", "d"}),
-                        java.util.Map.entry("run-ref", new String[]{"bmrig.speed.run-ref", "d"}),
-                        java.util.Map.entry("max-head", new String[]{"bmrig.body.max-head", "d"}),
-                        java.util.Map.entry("max-body", new String[]{"bmrig.body.max-body", "d"}),
-                        java.util.Map.entry("rotation-delay", new String[]{"bmrig.body.rotation-delay", "i"}),
-                        java.util.Map.entry("rotation-duration", new String[]{"bmrig.body.rotation-duration", "i"}),
-                        java.util.Map.entry("overlay-override", new String[]{"bmrig.overlay-override", "b"}));
-                    if (sub.equals("show")) {
-                        for (var e : params.entrySet())
-                            sender.sendMessage(Component.text(String.format("  %-18s = %s", e.getKey(),
-                                getConfig().get(e.getValue()[0], "(default)")), NamedTextColor.AQUA));
-                        for (String a : new String[]{"idle","walk","run","jump","aim","hold_gun","hold_item","fire","reload"})
-                            sender.sendMessage(Component.text(String.format("  anim %-10s -> %s", a,
-                                getConfig().getString("bmrig.animations." + a, "(default)")), NamedTextColor.GRAY));
-                        return true;
-                    }
-                    if (sub.equals("reset")) { getConfig().set("bmrig", null); saveConfig(); return ok(sender, "bmrig config reset to defaults (re-toggle /lab bmrig for body params)."); }
-                    if (sub.equals("dur")) {
-                        if (args.length < 4) return error(sender, "/lab bmset dur <action> <ticks>");
-                        try { getConfig().set("bmrig.durations." + args[2].toLowerCase(), Integer.parseInt(args[3])); }
-                        catch (NumberFormatException e) { return error(sender, "Ticks must be a number."); }
-                        saveConfig();
-                        return ok(sender, "Set " + args[2] + " duration = " + args[3] + " ticks.");
-                    }
-                    if (args.length < 3) return error(sender, "/lab bmset <action|param> <value>");
-                    String value = args[2];
-                    String[] param = params.get(sub);
-                    try {
-                        if (param != null) getConfig().set(param[0], switch (param[1]) {
-                            case "d" -> Double.parseDouble(value);
-                            case "i" -> Integer.parseInt(value);
-                            case "b" -> value.equals("1") || value.equalsIgnoreCase("true");
-                            default -> value;
-                        });
-                        else getConfig().set("bmrig.animations." + sub, value);   // action -> .bbmodel animation name
-                    } catch (NumberFormatException e) { return error(sender, "Value must be a number for " + sub + "."); }
-                    saveConfig();
-                    return ok(sender, "Set bmrig " + sub + " = " + value + (params.containsKey(sub) && (sub.startsWith("max") || sub.startsWith("rotation"))
-                        ? " (re-toggle /lab bmrig to apply body rotation)." : ". Live now."));
-                }
                 case "fire" -> {
                     // /lab fire clear [radius]  -> put out every fire block around you (emergency cleanup)
                     if (!sender.hasPermission("lab.admin")) return error(sender, "No permission.");
@@ -654,15 +511,8 @@ public final class LabraPlugin extends JavaPlugin {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         return switch (args.length) {
-            case 1 -> filter(Stream.of("give", "zone", "place", "extinguisher", "sprinkler", "removemachines", "admin", "scp1499", "hud", "menu", "rig", "rigtune", "riganim", "bmrig", "bmanim", "bmset", "fire", "reload"), args[0]);
+            case 1 -> filter(Stream.of("give", "zone", "place", "extinguisher", "sprinkler", "removemachines", "admin", "scp1499", "hud", "menu", "fire", "reload"), args[0]);
             case 2 -> switch (args[0].toLowerCase()) {
-                case "rigtune" -> filter(Stream.concat(Stream.of("show", "reset"),
-                    Stream.of(PlayerRig.TUNABLE)), args[1]);
-                case "riganim" -> filter(Stream.concat(Stream.of("show", "reset"),
-                    Stream.of(PlayerRig.ANIM_ATTRS)), args[1]);
-                case "bmset" -> filter(Stream.of("show", "reset", "dur", "model", "speed-scale", "transition-ticks",
-                    "walk-ref", "run-ref", "max-head", "max-body", "rotation-delay", "rotation-duration", "overlay-override",
-                    "idle", "walk", "run", "jump", "aim", "hold_gun", "hold_item", "fire", "reload"), args[1]);
                 case "hud" -> filter(Stream.concat(Stream.of("credits", "meters"),
                     getServer().getOnlinePlayers().stream().map(Player::getName)), args[1]);
                 case "fire" -> filter(Stream.of("clear"), args[1]);
@@ -680,9 +530,7 @@ public final class LabraPlugin extends JavaPlugin {
                 case "sprinkler" -> filter(Stream.of("button", "select", "link", "remove"), args[1]);
                 default -> List.of();
             };
-            case 3 -> args[0].equalsIgnoreCase("rigtune") && PlayerRig.isTunablePart(args[1].toLowerCase())
-                ? filter(Stream.of(PlayerRig.FIELDS), args[2])
-                : args[0].equalsIgnoreCase("zone")
+            case 3 -> args[0].equalsIgnoreCase("zone")
                     && (args[1].equalsIgnoreCase("remove") || args[1].equalsIgnoreCase("alarm"))
                     ? filter(registry.zones().keySet().stream(), args[2]) : List.of();
             case 4 -> switch (args[0].equalsIgnoreCase("zone") ? args[1].toLowerCase() : "") {

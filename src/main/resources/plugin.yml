@@ -2,7 +2,6 @@ name: Labra
 version: '${project.version}'
 main: fi.alavesa.labra.LabraPlugin
 api-version: '1.21'
-softdepend: [BetterModel]
 description: Lab equipment - hazard zones, hazmat suits, geiger counter.
 commands:
   lab:
