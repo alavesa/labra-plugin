@@ -66,7 +66,6 @@ public final class LabMenu implements Listener {
         record G(String id, Material icon, String name) { }
         for (G g : List.of(
             new G("scp009", Material.ICE, "SCP-009 Sample"),
-            new G("scp999", Material.SLIME_BALL, "SCP-999 Gel"),
             new G("scp207", Material.POTION, "SCP-207 \"Regular Cola\""),
             new G("scp148", Material.IRON_INGOT, "SCP-148 Telekill"),
             new G("scp500", Material.RED_DYE, "SCP-500"),

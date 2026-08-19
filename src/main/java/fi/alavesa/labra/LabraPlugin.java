@@ -241,7 +241,7 @@ public final class LabraPlugin extends JavaPlugin {
                         // lab-datapack items: the plugin is the interface, the
                         // datapack functions stay the engine
                         case "kit", "rod", "pipette", "manual", "table",
-                             "scp009", "scp999", "scp207", "scp148", "scp500", "scp008",
+                             "scp009", "scp207", "scp148", "scp500", "scp008",
                              "scp268", "scp1499", "scp714", "scp018", "scp427", "scp1033",
                              "ziptie", "handcuffs", "battery", "medkit", "scp005" -> {
                             if (!sender.hasPermission("lab.give")) return error(sender, "No permission.");
@@ -519,7 +519,7 @@ public final class LabraPlugin extends JavaPlugin {
                 case "give" -> filter(Stream.of("hazmat", "geiger", "sample", "extinguisher",
                     "gasmask", "supergasmask", "heavygasmask", "kit", "rod",
                     "pipette", "manual", "table", "element",
-                    "scp009", "scp999", "scp207", "scp148", "scp500", "scp008", "credit", "credit10", "credit100",
+                    "scp009", "scp207", "scp148", "scp500", "scp008", "credit", "credit10", "credit100",
                     "scp268", "scp1499", "scp714", "scp018", "scp427", "scp1033",
                     "nvg", "nvgred", "nvgblue", "ziptie", "handcuffs", "battery", "medkit", "scp005",
                     "scp500bottle", "scp1079packet", "scp1079gum", "scp1079crate", "mop"), args[1]);
@@ -549,7 +549,7 @@ public final class LabraPlugin extends JavaPlugin {
      *  own hazmat/geiger/sample). */
     private static final List<String> DATAPACK_ITEMS =
         List.of("kit", "rod", "pipette", "manual", "table", "element",
-            "scp009", "scp999", "scp207", "scp148", "scp500", "scp008",
+            "scp009", "scp207", "scp148", "scp500", "scp008",
             "scp268", "scp1499", "scp714", "scp018", "scp427", "scp1033",
             "nvg", "ziptie", "handcuffs", "battery", "medkit", "scp005");
 
