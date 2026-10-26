@@ -95,8 +95,13 @@ public final class LabraPlugin extends JavaPlugin {
         labMenu = new LabMenu(this);
         getServer().getPluginManager().registerEvents(labMenu, this);
         SprintManager sprint = new SprintManager(registry);
-        getServer().getPluginManager().registerEvents(sprint, this);
-        getServer().getScheduler().runTaskTimer(this, sprint, 40L, 2L);
+        // sprint.enabled: false hands sprint stamina over to another plugin (Vitals) - the HUD meter then stays full
+        if (getConfig().getBoolean("sprint.enabled", true)) {
+            getServer().getPluginManager().registerEvents(sprint, this);
+            getServer().getScheduler().runTaskTimer(this, sprint, 40L, 2L);
+        } else {
+            getLogger().info("Sprint stamina disabled (sprint.enabled: false) - another plugin owns it");
+        }
         hud = new HudTask(this, sprint);
         getServer().getScheduler().runTaskTimer(this, hud, 40L, 5L);
         DownedListener dying = new DownedListener(this);
